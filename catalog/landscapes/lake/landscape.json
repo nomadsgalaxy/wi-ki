@@ -1,0 +1,17 @@
+{
+ "name": "lake",
+ "place": "LAKE PLACID",
+ "lat": 44.28,
+ "lon": -73.98,
+ "waterline": 96,
+ "strike": [
+  6,
+  31
+ ],
+ "credit": {
+  "author": "Wi-Ki",
+  "licence": "CC0-1.0",
+  "source": "drawn in code for Wi-Ki's catalog"
+ },
+ "about": "a mountain lake: snowy peaks, pines, trees that change with the seasons, and a cabin whose windows light up at dusk"
+}

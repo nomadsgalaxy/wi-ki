@@ -68,6 +68,8 @@ def assemble(repo, dest):
         if name.endswith(".py"):
             shutil.copy2(f"{repo}/catalog/transitions/{name}", f"{dest}/transitions/{name}")
     shutil.copytree(f"{repo}/catalog/entries", f"{dest}/entries")   # what each one is, for the setup page
+    if os.path.isdir(f"{repo}/catalog/landscapes"):   # people's own scenes for the weather page
+        shutil.copytree(f"{repo}/catalog/landscapes", f"{dest}/landscapes", ignore=skip)
 
 
 def update():
