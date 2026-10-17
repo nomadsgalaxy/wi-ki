@@ -49,6 +49,10 @@ Every page and transition is in `catalog/`, with an entry in `catalog/entries/<n
 
 `kiosk/admin.py` is the kiosk's setup page, and it's security code: it faces whatever network the kiosk is on. Keep its rules when you change it: HTTPS only, its own addresses and local networks only, the form token and the same-origin check on every change, the login throttle, and nothing secret in its log. `kiosk/setup_check.py` tests those rules, and `kiosk.py --check` runs it. A new setting writes the same files `kiosk.py` reads (`playlist.json`, `transitions-off.json`), checked first (`config.validate_playlist()`), and goes to the render server through `link.py` on a kiosk that shows one (signed with the shared key in `remote.json`, and refused without it).
 
+## Installed pages and transitions
+
+A kiosk only has the core (`kiosk/core.json`) plus what's been installed (`kiosk/packs.py`). So no page may import another page, and nothing in the base may name a page or a transition directly: `pages/` and `transitions/` find whatever's installed, and a check that tests one theme in particular skips it when it isn't there. `kiosk.py --check` on a kiosk with only the core has to pass too.
+
 ## Per-kiosk settings
 
 Every kiosk runs the same code. What makes one different lives on it, in `~/.config/kiosk/`, which updates never touch: `branch` (what to follow; `main` if it's missing), `playlist.json`, `transitions-off.json`, `remote.json` (its render server) and `eventsync.json` (its calendar's sources). Without one, the repo's copy is used, and with no `remote.json` the kiosk draws its own pages. Never put one kiosk's settings in the repo.

@@ -1,0 +1,14 @@
+[Unit]
+Description=Wi-Ki: install, update or remove a page or transition, as the setup page asked (see packs.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kiosk
+ExecStart=/usr/bin/python3 -I /home/kiosk/kiosk/packs.py --run
+# the display comes first: on a single-core Zero this waits for spare CPU and disk
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=256M
+TimeoutStartSec=15min
