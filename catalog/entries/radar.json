@@ -1,0 +1,44 @@
+{
+ "name": "radar",
+ "kind": "page",
+ "home": "public",
+ "about": "what's flying overhead, on a live map",
+ "found": {
+  "main": "d925e6"
+ },
+ "shapes": [
+  "bar",
+  "16-9",
+  "9-16"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "api.adsb.lol",
+   "api.adsbdb.com",
+   "mesonet.agron.iastate.edu",
+   "overpass-api.de",
+   "overpass.private.coffee"
+  ],
+  "secrets": []
+ },
+ "settings": {
+  "lat": 39.95,
+  "lon": -75.17,
+  "radius": 25
+ },
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "OpenStreetMap data (ODbL, credited on screen); NEXRAD radar tiles from the Iowa Environmental Mesonet",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

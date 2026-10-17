@@ -1,0 +1,36 @@
+{
+ "name": "agents",
+ "kind": "page",
+ "home": "public",
+ "about": "how much of each AI plan I've used, and what my herdr workspaces are doing. The owner will pick what it shows, but the code doesn't do that yet",
+ "found": {
+  "main": "ec7979"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "server",
+  "touch": false,
+  "services": [],
+  "secrets": []
+ },
+ "settings": {
+  "feed": "~/.cache/kiosk/desk.json"
+ },
+ "ask": [
+  "feed"
+ ],
+ "licence": {
+  "code": "MIT",
+  "assets": "drawn in code",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

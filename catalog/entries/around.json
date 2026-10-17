@@ -1,0 +1,42 @@
+{
+ "name": "around",
+ "kind": "page",
+ "home": "public",
+ "about": "the blocks around Hive76: 311 reports, permits and Indego bikes",
+ "found": {
+  "main": "491b99"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "gbfs.bcycle.com",
+   "overpass-api.de",
+   "overpass.private.coffee",
+   "phl.carto.com"
+  ],
+  "secrets": []
+ },
+ "settings": {
+  "view": "all",
+  "lat": null,
+  "lon": null,
+  "radius": 1000
+ },
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "OpenStreetMap data (ODbL); City of Philadelphia open data; Indego's live feed",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

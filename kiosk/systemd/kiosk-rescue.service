@@ -1,0 +1,12 @@
+[Unit]
+Description=Kiosk Wi-Fi rescue: a setup hotspot when the kiosk has lost its Wi-Fi (kiosk/rescue.py)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+ExecStart=/usr/bin/python3 -I /home/kiosk/kiosk/rescue.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

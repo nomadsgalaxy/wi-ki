@@ -1,0 +1,9 @@
+[Unit]
+Description=Wi-Ki: collect the calendar's events at boot and every 15 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
