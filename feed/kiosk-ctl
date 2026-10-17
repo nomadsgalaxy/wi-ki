@@ -1,0 +1,6 @@
+#!/bin/sh
+# kiosk-ctl: pick what the desk kiosk shows, from my desktop.
+#   kiosk-ctl status | show <page> | auto | next
+# The Pi runs kiosk/control.py for this key and nothing else, so the arguments are all it gets.
+exec ssh -T -i ~/.ssh/desk-kiosk-control -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
+  "${KIOSK_HOST:-kiosk@kiosk.local}" "${@:-status}"

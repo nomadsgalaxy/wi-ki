@@ -1,0 +1,13 @@
+[Unit]
+Description=Stream my desktop's resources to the desk kiosk's system page
+After=graphical-session.target
+
+[Service]
+Environment=KIOSK_HOST=kiosk@kiosk.local
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/wi-ki/feed/sysfeed.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
