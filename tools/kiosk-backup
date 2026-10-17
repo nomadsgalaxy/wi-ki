@@ -17,7 +17,8 @@ puts the settings back without them, so a restored kiosk gets a new first-boot l
 """
 import json, os, re, subprocess, sys, tempfile
 
-FILES = ("branch", "config.json", "playlist.json", "transitions-off.json", "remote.json", "eventsync.json")
+FILES = ("branch", "config.json", "playlist.json", "transitions-off.json", "remote.json", "eventsync.json",
+         "installed.json", "packs.json")   # packs.json: which repos, at which commits, so a restore can install them again
 SECRET = re.compile(r"-----BEGIN|\b[0-9a-f]{64}\b|\b(gh[pousr]|github_pat|sk|xox[bp])[-_][A-Za-z0-9_-]{16,}|op://", re.I)
 
 
