@@ -2,7 +2,7 @@
  "name": "agents",
  "kind": "page",
  "home": "public",
- "about": "how much of each AI plan I've used, and what my herdr workspaces are doing. The owner will pick what it shows, but the code doesn't do that yet",
+ "about": "how much of each AI plan I've used, and what my herdr workspaces are doing. The owner will pick what it shows, but the code doesn't do that yet. Needs the desk feed (feed/deskfeed.py), with herdr and KodexBar, on the desktop it shows: feed/README.md has the steps.",
  "found": {
   "main": "ec7979"
  },
