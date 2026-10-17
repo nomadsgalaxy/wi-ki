@@ -1,10 +1,10 @@
 [Unit]
-Description=Wi-Ki: the setup page, at https://<the kiosk's address> (only with "setup": true; see admin.py)
+Description=Wi-Ki: the setup page, at https://<the kiosk's address> (see admin.py)
 # a Zero has no clock of its own: the certificate's dates only mean something once the time is set
 After=network-online.target time-sync.target
 Wants=network-online.target time-sync.target
-# updates turn this on like any service with an [Install] section, but admin.py only opens a port when the kiosk's
-# config.json says "setup": true, and otherwise exits straight away, so no update can open one by itself
+# updates turn this on like any service with an [Install] section; admin.py serves on a kiosk with a screen unless
+# its config.json says "setup": false, and exits straight away otherwise (a render server, say)
 
 [Service]
 User=kiosk

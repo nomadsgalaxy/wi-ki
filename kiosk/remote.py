@@ -20,7 +20,7 @@ Standard library only.
 """
 import json, os, socket, struct, threading, time, zlib
 
-import kit, transitions
+import kit, link, transitions
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REMOTE = os.path.expanduser("~/.config/kiosk/remote.json")   # this kiosk's own server, which updates leave alone
@@ -74,8 +74,21 @@ class Server:
         threading.Thread(target=self.accept, daemon=True).start()
 
     def accept(self):
+        nonces = link.Nonces()
         while True:
             conn, addr = self.listener.accept()
+            conn.settimeout(0.5)
+            try:   # a setup page with a settings message starts with CONF (link.py); a Pi says nothing and waits
+                first = conn.recv(4, socket.MSG_PEEK | socket.MSG_WAITALL)
+            except OSError:   # the half second ran out with nothing said: a Pi
+                first = None
+            if first == b"CONF":
+                threading.Thread(target=link.answer, args=(conn, link.key(), link.settings, nonces), daemon=True).start()
+                continue
+            if first is not None:   # it said something else, or hung up straight away: not a Pi, so the Pi keeps its screen
+                conn.close()
+                continue
+            conn.settimeout(None)
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             print(f"remote: the Pi connected from {addr[0]}", flush=True)
             if self.conn:
@@ -195,6 +208,15 @@ def check():
             break
         time.sleep(0.02)
     assert mm == server.mm, "and keeps up after the transition"
+    # a settings message, or anything else that isn't a Pi, gets its own answer and leaves the Pi's screen alone
+    pi_conn = server.conn
+    try:
+        link.request(("127.0.0.1", port), "0" * 64, {"op": "get"})
+    except ValueError:   # this machine's key isn't all zeros (or it has none): either way it's answered, and refused
+        pass
+    socket.create_connection(("127.0.0.1", port)).sendall(b"GET / HTTP/1.0\r\n\r\n")
+    time.sleep(0.2)
+    assert server.conn is pi_conn, "the Pi still has its screen"
     done.set(); server.mm[0:2] = b"\x0a\x0a"; server.flush(); pi.join(5)
     assert not pi.is_alive(), "stop() hands the screen back to the Pi at the next message"
     server.listener.close()
