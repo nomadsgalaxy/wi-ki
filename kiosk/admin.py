@@ -10,14 +10,16 @@ Two ways in, each with its own certificate:
             login; "setup_by_ip": false in config.json turns it off once the first login's been replaced. Before
             that (first boot, or once admin-login.json is deleted to reset a forgotten login) it's always on.
 
-It only starts if config.json reads cleanly with "setup": true and a card ID, and at least one of those ways in is
-good. So no update can open a port on a kiosk by itself, even though updates turn systemd/kiosk-admin.service on.
-That runs it as the kiosk user, with only the capability to bind ports 443 and 80.
+It runs on every kiosk with a screen (to show the first-boot login on), unless config.json says "setup": false, and
+never on a render server. A kiosk without a card ID gets one when it starts. It only starts if config.json reads
+cleanly and at least one of those ways in is good. systemd/kiosk-admin.service runs it as the kiosk user, with only
+the capability to bind ports 443 and 80.
 
 Once someone's logged in with their own login, it has the kiosk's settings: its status, its pages (on or off, how
 long, in what order, and more from the catalog), its transitions and its location. They're the same files kiosk.py
 reads in ~/.config/kiosk/, and a change restarts the display. A kiosk whose pages a render server draws has its
-settings on the server, so there they're shown but not changed.
+settings on the server: with the same "key" in both kiosks' remote.json, changes go to the server (link.py), and
+without one they're only shown.
 
 Logging in: until the kiosk is set up, its screen shows a user name (Kiosk-<word>) and three-word password, new every
 time this starts, kept only in /run/kiosk. The first login has to replace them; the replacement is kept as an scrypt
@@ -39,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves our own folder off the path
 
-import config  # noqa: E402
+import config, link  # noqa: E402
 
 CONF = os.path.dirname(config.PATH)
 TLS = os.path.join(CONF, "tls")
@@ -80,8 +82,8 @@ class Why(str):
 
 def gate(cfg, cert=CERT, key=KEY, root=ROOT):
     """None if the setup page may be served by name, else Why not"""
-    if cfg.get("setup") is not True:
-        return Why('setup is off ("setup": true in config.json turns it on)', "off")
+    if not config.setup_on(cfg):
+        return Why('setup is off ("setup": false in config.json, or no screen to show its first-boot login on)', "off")
     if not cfg["id"]:
         return Why("this kiosk has no card ID yet (config.py --id)", "id")
     for path in (root, cert, key):
@@ -119,7 +121,7 @@ def configured(login=LOGIN):
 def by_ip(cfg, login=LOGIN):
     """whether it can be set up by IP address right now: always before its first login is replaced, and after that
     unless config.json says "setup_by_ip": false"""
-    return cfg.get("setup") is True and bool(cfg["id"]) and (cfg.get("setup_by_ip") is not False or not configured(login))
+    return config.setup_on(cfg) and bool(cfg["id"]) and (cfg.get("setup_by_ip") is not False or not configured(login))
 
 
 def request(cfg, key=KEY, csr=CSR):
@@ -554,22 +556,25 @@ class Setup(BaseHTTPRequestHandler):
 
     def settings(self, path, fields, s):
         """one change from the Pages, Transitions or Location form: checked, saved in one move, then the display
-        restarts with it. Not with the first-boot login, and not on a kiosk whose pages a render server draws."""
+        restarts with it, or the render server's if it draws the pages. Not with the first-boot login, and not on a
+        kiosk shown by a render server without the key to change it there."""
         st = self.state
         if s["temporary"]:
             return self.go("/change")
-        if server():
+        if locked():
             return self.reply(page(st.cfg["id"], SETTINGS[path](s["csrf"])), code=409)
         with st.saving:
             try:
                 if path == "/transitions":
-                    write_private(OFF, change_transitions(fields, themes()))
+                    save(off=change_transitions(fields, themes()))
+                elif path == "/pages":
+                    save(playlist=change_pages(current()["playlist"], fields, catalog(), server()))
                 else:
-                    change = change_pages if path == "/pages" else change_location
-                    write_private(PLAYLIST, change(current_playlist()[0], fields, catalog()))
+                    save(playlist=change_location(current()["playlist"], fields, catalog()))
             except ValueError as e:
                 return self.reply(page(st.cfg["id"], SETTINGS[path](s["csrf"], str(e))), code=400)
-            restart()
+            except OSError as e:
+                return self.reply(page(st.cfg["id"], SETTINGS[path](s["csrf"], f"Couldn't reach its render server: {e}")), code=502)
         return self.go(path)
 
     # --- answering ---
@@ -704,22 +709,59 @@ def server():
         return None
 
 
-def current_playlist():
-    """-> (the playlist it runs, whether it's the kiosk's own)"""
-    for path, own in ((PLAYLIST, True), (REPO_PLAYLIST, False)):
+def linked():
+    """(the render server's address, the shared key) when this kiosk's settings are kept on its server and both have
+    the key in remote.json; None otherwise"""
+    try:
+        r = json.load(open(REMOTE))
+        address = (r["server"], int(r.get("port", 7676)))
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return None
+    k = link.key(REMOTE)
+    return (address, k) if k else None
+
+
+def locked():
+    """a kiosk whose pages a render server draws, without the key to change them there: it only shows its settings"""
+    return bool(server()) and not linked()
+
+
+def current():
+    """the settings the display runs -> {"playlist", "own", "off"}: from its render server when that's where they're
+    kept, else from this kiosk's files. Raises OSError or ValueError if the server can't be asked."""
+    to = linked() if server() else None
+    if to:
+        got = link.request(*to, {"op": "get"})
+        return {"playlist": config.validate_playlist(got["playlist"]), "own": bool(got["own"]),
+                "off": [n for n in got["off"] if isinstance(n, str)]}
+    playlist, own = [], False
+    for path, mine in ((PLAYLIST, True), (REPO_PLAYLIST, False)):
         try:
-            return config.validate_playlist(json.load(open(path))), own
+            playlist, own = config.validate_playlist(json.load(open(path))), mine
+            break
         except (OSError, ValueError):
             pass
-    return [], False
-
-
-def current_off():
     try:
         off = json.load(open(OFF))
     except (OSError, ValueError):
-        return []
-    return sorted({n for n in off if isinstance(n, str)}) if isinstance(off, list) else []
+        off = []
+    return {"playlist": playlist, "own": own,
+            "off": sorted({n for n in off if isinstance(n, str)}) if isinstance(off, list) else []}
+
+
+def save(playlist=None, off=None):
+    """save new settings where they're kept: on the render server (which restarts its own display), or here, then
+    restart this display"""
+    to = linked() if server() else None
+    if to:
+        link.request(*to, {"op": "put", **({"playlist": playlist} if playlist is not None else {}),
+                           **({"off": off} if off is not None else {})})
+        return
+    if playlist is not None:
+        write_private(PLAYLIST, playlist)
+    if off is not None:
+        write_private(OFF, off)
+    restart()
 
 
 def unusable(entry, drawn_by):
@@ -811,21 +853,32 @@ def logout(csrf):
 
 
 def elsewhere(drawn_by):
-    """the note for a kiosk whose pages come from a render server: they're set there, not here"""
+    """the note for a kiosk whose pages come from a render server: changed there, or only shown without the key"""
+    if not locked():
+        return f"<p>This kiosk's pages are drawn by its render server, {html.escape(drawn_by)}. Changes here go to it.</p>"
     return (f"<p class=note>This kiosk shows pages drawn by its render server, {html.escape(drawn_by)}, so its pages, "
-            "transitions and location are set on the server: over SSH, or with deploy/kiosk-config. What it's set to "
-            "is below.</p>")
+            "transitions and location are set on the server. To change them from here, give this kiosk and its "
+            "server the same \"key\" in remote.json. What it's set to is below.</p>")
+
+
+def unreachable(title, e):
+    return f"{NAV}<h2>{title}</h2><p class=note>Couldn't reach its render server ({html.escape(str(e))}), so there's nothing to show here right now.</p>"
 
 
 def status_page(st, csrf):
     applied = read_text(os.path.join(CACHE, "applied-commit"))[:7] or "not by autoupdate yet"
-    drawn_by, (entries, own) = server(), current_playlist()
-    on = [e["page"] for e in entries if e.get("on", True)]
+    drawn_by = server()
+    try:
+        now = current()
+    except (OSError, ValueError):
+        now = {"playlist": [], "own": True, "off": []}
+    entries, own = now["playlist"], now["own"]
+    on = [e["page"] for e in entries if e.get("on", True)] or ["(couldn't reach its render server)"]
     rows = [("Card", st.cfg["id"]), ("Name", socket.gethostname()), ("Addresses", ", ".join(st.addrs)),
             ("Code", applied), ("Pages drawn by", drawn_by or "this kiosk"),
             ("Showing", "" if drawn_by else read_text(os.path.join(CACHE, "showing"))),
             ("Playlist", ", ".join(on) + ("" if own else " (the repo's)")),
-            ("Transitions off", ", ".join(current_off()) or "none"),
+            ("Transitions off", ", ".join(now["off"]) or "none"),
             ("Setup by IP", "on" if by_ip(st.cfg, st.login) else "off")]
     table = "".join(f"<tr><th>{html.escape(k)}<td>{html.escape(v)}" for k, v in rows if v)
     return f"{NAV}<h2>Status</h2><table>{table}</table>{logout(csrf)}"
@@ -845,7 +898,11 @@ def button(csrf, action, label, i=None, extra=""):
 
 
 def pages_page(csrf, note=""):
-    drawn_by, (entries, own), known = server(), current_playlist(), catalog()
+    try:
+        now = current()
+    except (OSError, ValueError) as e:
+        return unreachable("Pages", e)
+    drawn_by, entries, own, known, ro = server(), now["playlist"], now["own"], catalog(), locked()
     rows = []
     for i, e in enumerate(entries):
         on = e.get("on", True)
@@ -854,7 +911,7 @@ def pages_page(csrf, note=""):
                    f'<input type=hidden name=action value=seconds><input type=hidden name=i value="{i}">'
                    f'<input name=seconds size=4 value="{html.escape(str(e.get("seconds", "")))}" placeholder=default>'
                    f'<button>Set</button></form>')
-        controls = "" if drawn_by else (button(csrf, "off" if on else "on", "Turn off" if on else "Turn on", i) +
+        controls = "" if ro else (button(csrf, "off" if on else "on", "Turn off" if on else "Turn on", i) +
                                         button(csrf, "up", "↑", i) + button(csrf, "down", "↓", i) +
                                         button(csrf, "remove", "Remove", i) + seconds)
         rows.append(f"<li class={'on' if on else 'off'}><b>{html.escape(e['page'])}</b> {'' if on else '(off)'}"
@@ -866,7 +923,7 @@ def pages_page(csrf, note=""):
         why = unusable(entry, drawn_by)
         adds.append(f"<li><b>{html.escape(name)}</b> <small>{html.escape(entry.get('about', ''))}</small><br>" +
                     (f"<small class=note>Can't: {html.escape(why)}</small>" if why else
-                     "" if drawn_by else button(csrf, "add", "Add", extra=f'<input type=hidden name=page value="{html.escape(name)}">')))
+                     "" if ro else button(csrf, "add", "Add", extra=f'<input type=hidden name=page value="{html.escape(name)}">')))
     return (f"{NAV}<h2>Pages</h2>{elsewhere(drawn_by) if drawn_by else ''}<p class=note>{html.escape(note)}</p>"
             f"<p>{'This kiosk has its own playlist.' if own else 'It runs the repo playlist until you change something here.'}"
             f" A page with no seconds set stays up for its own time.</p><ol>{''.join(rows)}</ol>"
@@ -874,23 +931,31 @@ def pages_page(csrf, note=""):
 
 
 def transitions_page(csrf, note=""):
-    drawn_by, off, known = server(), set(current_off()), catalog()
+    try:
+        off = set(current()["off"])
+    except (OSError, ValueError) as e:
+        return unreachable("Transitions", e)
+    drawn_by, known, ro = server(), catalog(), locked()
     boxes = "".join(f'<label class=check><input type=checkbox name="t_{n}" value=on{"" if n in off else " checked"}'
-                    f'{" disabled" if drawn_by else ""}> <b>{html.escape(n)}</b> '
+                    f'{" disabled" if ro else ""}> <b>{html.escape(n)}</b> '
                     f'<small>{html.escape(known.get(n, {}).get("about", ""))}</small></label>' for n in themes())
-    save = "" if drawn_by else f'<input type=hidden name=csrf value="{csrf}"><button>Save</button>'
+    save = "" if ro else f'<input type=hidden name=csrf value="{csrf}"><button>Save</button>'
     return (f"{NAV}<h2>Transitions</h2>{elsewhere(drawn_by) if drawn_by else ''}<p class=note>{html.escape(note)}</p>"
             f"<p>Between pages, these take turns. Untick one to skip it.</p><form method=post action=/transitions>{boxes}{save}</form>")
 
 
 def location_page(csrf, note=""):
-    drawn_by, (entries, _), known = server(), current_playlist(), catalog()
+    try:
+        entries = current()["playlist"]
+    except (OSError, ValueError) as e:
+        return unreachable("Location", e)
+    drawn_by, known, ro = server(), catalog(), locked()
     takers = [e for e in entries if {"lat", "lon"} <= set(known.get(e["page"], {}).get("settings", {}))]
     now = next((e.get("options", {}) for e in takers if "lat" in e.get("options", {})), {})
     names = ", ".join(sorted({e["page"] for e in takers})) or "none of its pages"
     field = lambda k, label: (f'<label>{label}<input name={k} value="{html.escape(str(now.get(k, "")))}"'
-                              f'{" disabled" if drawn_by else ""}></label>')
-    save = "" if drawn_by else f'<input type=hidden name=csrf value="{csrf}"><button>Save</button>'
+                              f'{" disabled" if ro else ""}></label>')
+    save = "" if ro else f'<input type=hidden name=csrf value="{csrf}"><button>Save</button>'
     return (f"{NAV}<h2>Location</h2>{elsewhere(drawn_by) if drawn_by else ''}<p class=note>{html.escape(note)}</p>"
             f"<p>Where it is, for {html.escape(names)}. A page with no location set uses its own default.</p>"
             f"<form method=post action=/location>{field('lat', 'Latitude')}{field('lon', 'Longitude')}"
@@ -961,6 +1026,8 @@ def run():
     except ValueError as e:   # the display falls back to its defaults; the setup page doesn't start at all
         print(f"admin: not starting: config.json: {e}", flush=True)
         return 0
+    if config.setup_on(cfg) and not cfg["id"]:   # a card made before IDs gets one now, and keeps it
+        cfg = {**cfg, "id": config.card_id()}
     why, ip = gate(cfg), by_ip(cfg)
     if why and not ip:
         print(f"admin: not starting: {why}", flush=True)
@@ -1244,7 +1311,36 @@ def check():
         before = open(PLAYLIST).read()
         status, _, body, _, _ = post("/pages", {"action": "on", "i": "0"})
         assert status == 409 and "render server, 10.0.0.9" in body and open(PLAYLIST).read() == before, \
-            "a render server's kiosk is set on the server"
+            "a render server's kiosk without the key only shows its settings"
+        # with the key in both remote.json files, the setup page changes the settings on the server
+        shared, served, server_restarts = secrets.token_hex(32), f"{d}/served", []
+        os.makedirs(f"{served}/conf"); os.makedirs(f"{served}/code/transitions")
+        for t in ("rain", "snow"):
+            open(f"{served}/code/transitions/{t}.py", "w").write("")
+        json.dump([{"page": "weather"}], open(f"{served}/code/playlist.json", "w"))
+        listener = socket.create_server(("127.0.0.1", 0)); link_port = listener.getsockname()[1]
+        handle = lambda m: link.settings(m, f"{served}/conf", f"{served}/code", lambda: server_restarts.append(1))
+        def serve():
+            nonces = link.Nonces()
+            while True:
+                try:
+                    conn, _ = listener.accept()
+                except OSError:
+                    return
+                link.answer(conn, shared, handle, nonces)
+        threading.Thread(target=serve, daemon=True).start()
+        json.dump({"server": "127.0.0.1", "port": link_port, "key": shared}, open(REMOTE, "w"))
+        here_before, local_restarts = open(PLAYLIST).read(), len(restarts)
+        assert "the repo playlist" in ask("GET", "/pages", name, cookies={"__Host-kiosk": session})[2], "the server's settings"
+        assert post("/pages", {"action": "add", "page": "sky"})[:2] == (303, "/pages")
+        assert [e["page"] for e in json.load(open(f"{served}/conf/playlist.json"))] == ["weather", "sky"] and server_restarts
+        assert open(PLAYLIST).read() == here_before and len(restarts) == local_restarts, "and not on the Pi"
+        assert post("/transitions", {"t_snow": "on"})[0] == 303 and json.load(open(f"{served}/conf/transitions-off.json")) == ["rain"]
+        assert post("/pages", {"action": "add", "page": "nope"})[0] == 400
+        listener.close()
+        status, _, body, _, _ = post("/pages", {"action": "on", "i": "0"})
+        assert status == 502 and "Couldn't reach" in body, "a server that's away says so"
+        assert "Couldn't reach its render server" in ask("GET", "/location", name, cookies={"__Host-kiosk": session})[2]
         os.remove(REMOTE)
         # once it's set up, by IP goes away (unless config keeps it), and the temporary login stops working
         assert ask("GET", "/up", ip, sni=False)[0] == 421, "set up, with setup_by_ip false: no more by IP"
