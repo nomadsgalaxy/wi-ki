@@ -50,7 +50,7 @@ Each kiosk keeps its own settings in `~/.config/kiosk/`. The updates never touch
 | `transitions-off.json` | transitions to skip, like `["matrix"]` (`deploy/kiosk-config` writes it) | all of them on |
 | `remote.json` | its render server: `{"server": "<address>", "port": 7676}` | it draws its own pages |
 | `eventsync.json` | where the calendar's events come from | no events |
-| `config.json` | the card's ID, and whether its setup page is on (`"setup": true`) | no setup page |
+| `config.json` | the card's ID, and `"setup": false` to turn its setup page off | the setup page is on, wherever there's a screen |
 | `admin-login.json` | the setup page's login, as a hash (the setup page writes it) | the first-boot login on the screen |
 
 The setup page changes `playlist.json` and `transitions-off.json` for you, on a kiosk that draws its own pages.
@@ -70,11 +70,11 @@ Then give it its own settings in `~/.config/kiosk/`, if it needs any.
 
 ## The setup page
 
-A kiosk can host its own setup page, so you can change its pages, transitions and location from a browser on the same network, without SSH. It's off until the kiosk's `~/.config/kiosk/config.json` says `"setup": true`. To have it on from the first boot, make the card with `KIOSK_SETUP=1 setup/firstboot.sh <boot partition>`.
+A kiosk can host its own setup page, so you can change its pages, transitions and location from a browser on the same network, without SSH. It's on by default on every kiosk with a screen, so you can come back and change things whenever you like, at `https://<the kiosk's address>`. To turn it off, put `"setup": false` in the kiosk's `~/.config/kiosk/config.json`, or make the card with `KIOSK_SETUP=0 setup/firstboot.sh <boot partition>`. Render servers never run it.
 
 **The first login.** While the kiosk isn't set up, its screen shows its address, a user name like `Kiosk-Otter` and a three-word password. Both are new every time the setup page starts, and they're only kept in memory. Go to the address. Your browser will warn that it can't check the certificate, because the kiosk made it for itself. Only go past that warning if the SHA-256 fingerprint your browser shows for it matches the one on the kiosk's screen: ignore the colons and capitals, and compare all 64 characters. If it doesn't match, don't log in, because something else on the network answered. The first thing it asks is for your own user name and password, and the screen stops showing the old ones.
 
-**What it changes.** The status of the kiosk, its pages (on or off, how long each stays up, their order, and more from the catalog), its transitions and its location. A change restarts the display, so you'll see it in a few seconds. A kiosk whose pages come from a render server has those settings on the server, so its setup page shows them but doesn't change them.
+**What it changes.** The status of the kiosk, its pages (on or off, how long each stays up, their order, and more from the catalog), its transitions and its location. A change restarts the display, so you'll see it in a few seconds. A kiosk whose pages come from a render server has those settings on the server: give the kiosk and its server the same `"key"` in `remote.json` (below) and the setup page changes them there. Without the key, it shows them but doesn't change them.
 
 **Forgot the login?** Over SSH, delete `~/.config/kiosk/admin-login.json` and run `sudo systemctl restart kiosk-admin`. The screen shows a new first-boot login.
 
@@ -85,6 +85,8 @@ It only serves HTTPS, on the kiosk's own addresses and only to local networks. L
 A Pi Zero is slow at drawing but quick at copying, so a kiosk can have a render server draw its pages while the Pi just shows them. A server is any small Linux box or container (Debian, 2 cores and 1 GB is plenty) running the same code as `kiosk.py --serve` (the `kiosk-serve` service). It updates itself from `main` the same way the Pi does. Setting one up is the same as a Pi, minus the screen: `deploy/deploy.sh`, then `setup/pi-setup.sh` as root. With no `/dev/fb0`, it installs `kiosk-serve` instead of the tty1 login. Then point the Pi at it with `~/.config/kiosk/remote.json`.
 
 After every frame, the server sends the Pi only the rows that changed, compressed. On a page change it sends the new page and which transition to play, and the Pi plays it itself. If the Pi can't reach the server, or the link drops, the Pi draws the pages itself for 10 minutes, then tries the server again. The desktop feeds and `kiosk-ctl` go to the server. Details are in `kiosk/remote.py`.
+
+**Changing its settings from the kiosk.** The kiosk's setup page can change the pages, transitions and location a render server draws for it, once both have the same key in `~/.config/kiosk/remote.json`: `{"server": "<address>", "port": 7676, "key": "<64 hex characters>"}` on the Pi, and the same `"key"` in the server's own `remote.json`. Make one with `python3 -c "import secrets; print(secrets.token_hex(32))"`. Every message between them is signed with it and only works once, so nothing else on the network can change the kiosk. `kiosk/link.py` has the details.
 
 ## Browser kiosks
 
