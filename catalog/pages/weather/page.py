@@ -5,6 +5,10 @@ chart and the next five days, every temperature in °C.
 It stays up for exactly one 64 s loop of the scene, which plays seamlessly. Open-Meteo (no key) every 10 minutes into
 CACHE, fetched in a background thread so the display never waits on the network. If the network drops, it keeps showing
 the last forecast and says how old it is. The forecast covers 14 days so other pages (the calendar) can use it too.
+
+Options (in playlist.json): lat and lon, for the forecast; place, the heading; landscape, the name of a folder in the
+catalog's landscapes/, to show someone's own scene instead of Philadelphia's (scene.py says what one is). A landscape
+brings its own location, place and credit, and lat, lon and place still win over them.
 """
 import json, math, os, struct, threading, time, urllib.request
 from datetime import date, datetime, timedelta
@@ -14,8 +18,8 @@ from kit import (SCREEN, O, W, G, D, B, C, A, BG, RULE, DIM, kind, warmth, clock
                  packed, rgb565)
 from . import scene
 
-# the forecast is for Philadelphia, where the skyline is, unless the playlist gives lat and lon; the panel says
-# PHILADELPHIA unless it gives a place
+# the forecast is for Philadelphia, where the skyline is, unless the playlist gives lat and lon or a landscape (which
+# has its own); the panel says PHILADELPHIA, or the landscape's place, unless it gives a place
 URL = ("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
        "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day"
        "&hourly=temperature_2m,precipitation_probability,weather_code&forecast_hours=12"
@@ -38,7 +42,7 @@ def windtext(c):
     return "wind unavailable" if ws is None else f"{round(ws)} mph {COMPASS[round(c['wind_direction_10m'] / 45) % 8]}"
 
 
-def panel(w, now, age, frame, place="PHILADELPHIA"):
+def panel(w, now, age, frame, place="PHILADELPHIA", credit=None):
     """the right side, 720x515"""
     img = Image.new("RGB", (SCREEN[0] - PANEL, SCREEN[1]), BG); d = ImageDraw.Draw(img)
     c, h, dd = w["current"], w["hourly"], w["daily"]
@@ -48,7 +52,7 @@ def panel(w, now, age, frame, place="PHILADELPHIA"):
     text(img, (X, 14), place, O)
     text(img, (R, 14), clock(now), W, right=True)
     text(img, (X, 50), now.strftime("%A, %B ") + str(now.day), G)
-    text(img, (R, 66), CREDIT, G, scale=1, right=True)   # the skyline's licence, always on the screen
+    text(img, (R, 66), CREDIT if credit is None else credit, G, scale=1, right=True)   # the scene's licence, always on screen
     d.rectangle((X, 90, R, 91), fill=RULE)
 
     # now: icon, the big temperature, what it's like
@@ -194,8 +198,13 @@ class Page:
     weather changes, at night every 5 minutes, as the lit windows reshuffle."""
     name, seconds = "weather", scene.LOOP
 
-    def __init__(self, w=None, lat=39.95, lon=-75.17, place="PHILADELPHIA"):
-        self.lat, self.lon, self.place = lat, lon, place
+    def __init__(self, w=None, lat=None, lon=None, place=None, landscape=None):
+        land = scene.landscape(landscape) if landscape else None   # one that isn't there, or isn't right, says why
+        self.land = landscape or None
+        self.lat = lat if lat is not None else land["lat"] if land else 39.95
+        self.lon = lon if lon is not None else land["lon"] if land else -75.17
+        self.place = place or (land["place"].upper() if land else "PHILADELPHIA")
+        self.credit = f"scene: {land['credit']['author']}, {land['credit']['licence']}"[:40] if land else None
         self.w, self.fixed = w, w is not None    # given a forecast (the self-test), it never fetches
         self.mtime, self.last_try = (1 if w else 0), 0
         self.loop, self.loop_key, self.moment, self.bg = {}, None, None, (None, None)
@@ -219,7 +228,7 @@ class Page:
 
     def start(self, now):
         self.refresh()
-        key = scene.moment(self.w, now) if self.w else None   # not the clock: by day one loop lasts until the sun or the weather moves
+        key = scene.moment(self.w, now, self.land) if self.w else None   # not the clock: by day one loop lasts until the sun or the weather moves
         if key != self.loop_key:
             self.loop, self.loop_key, self.moment = {}, key, now
         if self.w:
@@ -227,7 +236,7 @@ class Page:
 
     def small(self, i):
         if i not in self.loop:
-            self.loop[i] = packed(scene.draw(self.w, self.moment, i / scene.FPS))
+            self.loop[i] = packed(scene.draw(self.w, self.moment, i / scene.FPS, self.land))
         return self.loop[i]
 
     def background(self, now):
@@ -238,7 +247,8 @@ class Page:
             return self.bg
         if key != self.bg[0]:
             full = Image.new("LA", SCREEN)
-            full.paste(packed(panel(self.w, now, 0 if self.fixed else time.time() - self.mtime, 0, self.place)), (PANEL, 0))
+            full.paste(packed(panel(self.w, now, 0 if self.fixed else time.time() - self.mtime, 0, self.place, self.credit)),
+                       (PANEL, 0))
             self.bg = (key, full)
         return self.bg
 
@@ -326,6 +336,7 @@ def check():
     dusk = noon.replace(hour=18, minute=30)
     assert scene.layers(sky, dusk)[0] is not scene.layers(sky, dusk.replace(minute=35))[0], "inside dusk the windows are redrawn every five minutes"
     assert scene.STRIKE * 4 == int(scene.LOOP * scene.FPS), "whole lightning strikes fill the loop"
+    landscapes_check(at)
     stale = panel(SAMPLE, now, 4000, 0); fresh = panel(SAMPLE, now, 120, 0)
     assert stale.getpixel((600, 500)) == A and fresh.getpixel((600, 500)) != A, "an old forecast gets a bar you can read across the room"
     global CREDIT
@@ -395,6 +406,60 @@ def check():
             slow.fetching.join()
         finally:
             CACHE, fetch, download = real
+
+
+def landscapes_check(at):
+    """every landscape in the catalog keeps the rules, and a landscape plays like Philadelphia does"""
+    import shutil, tempfile
+    folder = scene.LANDSCAPES
+    names = sorted(n for n in os.listdir(folder) if os.path.isdir(os.path.join(folder, n))) if os.path.isdir(folder) else []
+    for name in names:
+        assert not scene.landscape_problems(os.path.join(folder, name)), (name, scene.landscape_problems(os.path.join(folder, name)))
+    assert "lake" in names, "the catalog's sample landscape"
+    lake = scene.landscape("lake")
+    for code in (0, 63, 73, 95):   # it loops seamlessly in any weather, and it isn't Philadelphia
+        w = json.loads(json.dumps(SAMPLE)); w["current"]["weather_code"] = code
+        for t in (0.0, 9.25):
+            assert scene.draw(w, at(19, 0), t, "lake").tobytes() == scene.draw(w, at(19, 0), t + scene.LOOP, "lake").tobytes(), (code, t)
+    assert scene.draw(SAMPLE, at(12, 0), 0.0, "lake").tobytes() != scene.draw(SAMPLE, at(12, 0), 0.0).tobytes()
+    assert scene.moment(SAMPLE, at(12, 0), "lake") != scene.moment(SAMPLE, at(12, 0)), "each landscape has its own loop"
+    assert scene.layers(SAMPLE, at(12, 0), "lake")[0]["strike"] == tuple(lake["strike"]), "lightning hits its own peak"
+    page = Page(json.loads(json.dumps(SAMPLE)), landscape="lake")
+    assert (page.lat, page.lon, page.place) == (lake["lat"], lake["lon"], "LAKE PLACID") and "Wi-Ki, CC0-1.0" in page.credit
+    assert Page(landscape="lake", lat=1.0, place="HOME").lat == 1.0 and Page(landscape="lake", place="HOME").place == "HOME"
+    assert Page().credit is None and Page().place == "PHILADELPHIA", "no landscape: Philadelphia, as always"
+    for bad in ("nope", "../lake", "Lake"):
+        try:
+            Page(landscape=bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"took the landscape {bad!r}")
+    # what a submitted one is held to
+    with tempfile.TemporaryDirectory() as d:
+        good = os.path.join(d, "good"); shutil.copytree(os.path.join(folder, "lake"), good)
+        assert scene.landscape_problems(good) == []
+        def broken(change, says):
+            bad = os.path.join(d, "bad"); shutil.rmtree(bad, ignore_errors=True); shutil.copytree(good, bad)
+            change(bad)
+            got = scene.landscape_problems(bad)
+            assert any(says in p for p in got), (says, got)
+        meta = json.load(open(os.path.join(good, "landscape.json")))
+        edit = lambda **k: lambda f: json.dump({**meta, **k}, open(os.path.join(f, "landscape.json"), "w"))
+        broken(edit(credit={"author": "x", "licence": "all rights reserved", "source": "y"}), "licence is one of")
+        broken(edit(credit={"author": "", "licence": "CC0-1.0", "source": "y"}), "author, licence and source")
+        broken(edit(lat=91), "place on Earth")
+        broken(edit(waterline=200), "waterline")
+        broken(edit(strike=[400, 10]), "strike")
+        broken(edit(place=""), "place is")
+        broken(lambda f: os.remove(os.path.join(f, "landscape.png")), "landscape.png is missing")
+        broken(lambda f: Image.new("RGBA", (200, 128)).save(os.path.join(f, "landscape.png")), "not 300x128")
+        broken(lambda f: Image.new("L", (300, 64)).save(os.path.join(f, "water.png")), "water.png is 300x64")
+        noisy = Image.frombytes("RGBA", scene.ART, os.urandom(scene.ART[0] * scene.ART[1] * 4))
+        broken(lambda f: noisy.save(os.path.join(f, "landscape.png")), "over 64 KB")
+        many = Image.new("RGBA", scene.ART); many.putdata([(i % 200, i // 200 % 200, 0, 255) for i in range(300 * 128)])
+        broken(lambda f: many.save(os.path.join(f, "landscape.png")), "more than 64 colours")
+        broken(lambda f: open(os.path.join(f, "landscape.json"), "w").write("{"), "won't read")
 
 
 def preview(now=None):

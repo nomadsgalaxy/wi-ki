@@ -100,6 +100,18 @@ Shapes are in `kit.SHAPES`, and a process draws the one `KIOSK_SHAPE` names. A p
 
 Between pages, a transition plays for about 3 seconds, taking turns: **CoreOne** (the new page is printed layer by layer by a zig-zagging hotend), **Hive76** (honeycomb cells fill with honey and open onto it, while a bee flies past), **Nomads Galaxy** (warp: it opens from the middle between beams, and the Drifter flies through), **The Matrix** (forty columns of code rain, with the new page showing through behind each one), **Hackerman** (a neon terminal hacks time while the page glitches in) and **Johnny 5** (a comic page: he rolls in and strikes, and the new page comes through). Nothing flashes the whole screen, so they're safe for anyone sensitive to flicker. A kiosk can turn any of them off in `transitions-off.json`.
 
+### Your own landscape
+
+The weather page plays the real weather over Philadelphia's skyline, but it can show any place's: give it `"landscape": "<name>"` in the playlist's options, and it uses `catalog/landscapes/<name>/` instead, with that landscape's own location and heading unless the playlist says otherwise. The catalog comes with one, `lake`, a mountain lake drawn for it (CC0).
+
+To make one, draw it at 300×128 pixels, the size it's shown at (it's scaled up four times on the screen):
+
+- **`landscape.png`:** the land, with the sky left clear. RGBA, 64 colours or fewer, 64 KB at most. Draw it as it looks at noon; the page lights it for the time of day.
+- **`windows.png`, `water.png`, `leaves.png`:** optional masks, white where lights come on at dusk, where it's water (the scene mirrors and ripples there), and where there are leaves (they take the season's colours, by how light each one is). Leave one out and that effect doesn't happen.
+- **`landscape.json`:** its name; `place`, the heading; `lat` and `lon`, for the forecast; `waterline`, the row the water starts at; `strike`, the `[x, y]` lightning hits; and `credit`, with `author`, `licence` and `source`.
+
+The licence has to be an open one (CC0, CC BY or CC BY-SA), and anything traced from a photo names the photo in `source`. `kiosk.py --check` holds every landscape to these rules. Send one in as a pull request that adds its folder, and a person looks at the art and where it came from before it's merged. `catalog/pages/weather/scene.py` has the details.
+
 ### The desktop pages
 
 GitHub, agents, system and now playing show what a desktop pushes to the kiosk, so they need the feeds in `feed/` running on that desktop. `feed/README.md` covers setting them up: `deskfeed` for GitHub and agents, `sysfeed` for system, and `nowplaying.py` for what's playing. The Desk Kiosk tray widget is optional.
