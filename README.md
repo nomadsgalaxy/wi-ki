@@ -55,6 +55,8 @@ Each kiosk keeps its own settings in `~/.config/kiosk/`. The updates never touch
 
 The setup page changes `playlist.json` and `transitions-off.json` for you, on a kiosk that draws its own pages.
 
+**Backing them up.** `tools/kiosk-backup` copies each kiosk's settings into a git repo of your own, one folder per kiosk, so a dead SD card can be set up again the way it was. It runs on a desktop that can reach the kiosks over SSH and pulls, so the kiosks hold no key to the backups. Secrets stay on the kiosk: the setup page's login and certificates aren't copied, the key in `remote.json` is left out, and a file that still looks like it holds a key or a token is refused. `tools/kiosk-backup --restore` puts a kiosk's settings back.
+
 ## Setting up a new kiosk
 
 1. Flash **Raspberry Pi OS Lite, 32-bit** (trixie or newer) to the SD card. Don't boot it yet.
