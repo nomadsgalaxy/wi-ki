@@ -17,9 +17,14 @@ goes in caches every renderer shares, and a failed fetch keeps the last one. Hiv
 uses them.
 
 Options (in playlist.json): view (default all); lat, lon, the middle (default Hive76); radius, in metres (default 1000).
+Another city's: place and area, for the title and the spot in the middle (default HIVE76 and Kensington); bikes, its
+bike share's GBFS feed, the folder with station_information.json in it, or null for none (default Indego's), and
+bike_share, its name; reports, "phl-carto", the address of an Open311 GeoReport v2 server (its open311/v2 folder,
+the standard most cities' 311 systems publish), or null; permits, "phl-carto" or null. Streets come from OpenStreetMap
+anywhere. A city with none of the rest still gets the map.
 """
-import json, math, os, threading, time, urllib.parse, urllib.request
-from datetime import datetime
+import json, math, os, threading, time, urllib.parse, urllib.request, zlib
+from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw
 
 from kit import SCREEN, A, text, clock, packed, local, freshness
@@ -31,8 +36,9 @@ HIVE76 = (39.986727, -75.130526)
 CARTO = "https://phl.carto.com/api/v2/sql"
 INDEGO = "https://gbfs.bcycle.com/bcycle_indego/"
 OVERPASS = ("https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter")
-CACHE = os.path.expanduser("~/.cache/kiosk/around-{lat}_{lon}_{radius}.json")   # 311 and permits, for one middle and radius
-BIKES = os.path.expanduser("~/.cache/kiosk/around-bikes-{lat}_{lon}.json")      # Indego, for one middle
+CACHE = os.path.expanduser("~/.cache/kiosk/around-{lat}_{lon}_{radius}{src}.json")   # 311 and permits, for one middle,
+BIKES = os.path.expanduser("~/.cache/kiosk/around-bikes-{lat}_{lon}{src}.json")      # radius and source; the bikes too
+PHL = "phl-carto"   # the City of Philadelphia's own data, for reports and permits
 STREETS = os.path.expanduser("~/.cache/kiosk/around-streets-{lat}_{lon}.json")
 EVERY, BIKES_EVERY, IDLE = 900, 60, 30   # seconds: city data, bikes, and how long a touched view stays before going back
 RETRY = 600                               # seconds before a fetch that failed is tried again (a success waits its EVERY)
@@ -53,17 +59,39 @@ def carto(sql):
     return get(CARTO + "?" + urllib.parse.urlencode({"q": sql}), timeout=60)["rows"]
 
 
-def fetch_city(lat, lon, radius):
-    """this week's 311 reports and this month's permits within radius metres, newest first"""
+def fetch_city(lat, lon, radius, reports=PHL, permits=PHL):
+    """this week's 311 reports and this month's permits within radius metres, newest first, from wherever the page was
+    told: Philadelphia's own data, an Open311 server for the reports, or nothing"""
     lat, lon = float(lat), float(lon)   # they go into the SQL
     near = f"ST_DWithin(the_geom::geography, ST_SetSRID(ST_MakePoint({lon}, {lat}), 4326)::geography, {int(radius)})"
-    reports = carto("select service_name, status, requested_datetime t, address, ST_Y(the_geom) lat, ST_X(the_geom) lon "
-                    f"from public_cases_fc where requested_datetime > now() - interval '7 days' and {near} "
-                    "order by requested_datetime desc limit 300")
-    permits = carto("select permittype, typeofwork, permitissuedate t, address, ST_Y(the_geom) lat, ST_X(the_geom) lon "
-                    f"from permits where permitissuedate > now() - interval '30 days' and {near} "
-                    "order by permitissuedate desc limit 300")
-    return {"reports": reports, "permits": permits, "fetched": datetime.now().isoformat(timespec="seconds")}
+    if reports == PHL:
+        found = carto("select service_name, status, requested_datetime t, address, ST_Y(the_geom) lat, ST_X(the_geom) lon "
+                      f"from public_cases_fc where requested_datetime > now() - interval '7 days' and {near} "
+                      "order by requested_datetime desc limit 300")
+    else:
+        found = open311(reports, lat, lon, radius) if reports else []
+    issued = carto("select permittype, typeofwork, permitissuedate t, address, ST_Y(the_geom) lat, ST_X(the_geom) lon "
+                   f"from permits where permitissuedate > now() - interval '30 days' and {near} "
+                   "order by permitissuedate desc limit 300") if permits == PHL else []
+    return {"reports": found, "permits": issued, "fetched": datetime.now().isoformat(timespec="seconds")}
+
+
+def open311(base, lat, lon, radius, days=7):
+    """this week's 311 reports within radius metres from an Open311 GeoReport v2 server, in the shape carto's come in.
+    Servers differ on radius, so it's checked here too, and a row with no place or time is left out."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = get(base.rstrip("/") + "/requests.json?" + urllib.parse.urlencode(
+        {"lat": lat, "long": lon, "radius": int(radius), "start_date": since}), timeout=60)
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        try:
+            a, b, t = float(r["lat"]), float(r["long"]), str(r["requested_datetime"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.hypot(*metres(lat, lon, a, b)) <= radius:
+            out.append({"service_name": str(r.get("service_name") or "report"), "status": str(r.get("status") or ""),
+                        "t": t, "address": str(r.get("address") or ""), "lat": a, "lon": b})
+    return sorted(out, key=lambda r: r["t"], reverse=True)[:300]
 
 
 def metres(lat, lon, a, b):
@@ -71,10 +99,12 @@ def metres(lat, lon, a, b):
     return (b - lon) * 111320 * math.cos(math.radians(lat)), (a - lat) * 110540
 
 
-def fetch_bikes(lat, lon, count=6):
-    """the nearest Indego stations: name, metres away, bikes, e-bikes, open docks"""
-    info = {s["station_id"]: s for s in get(INDEGO + "station_information.json")["data"]["stations"]}
-    status = {s["station_id"]: s for s in get(INDEGO + "station_status.json")["data"]["stations"]}
+def fetch_bikes(lat, lon, count=6, feed=INDEGO):
+    """the nearest stations of a bike share's GBFS feed (Indego's by default): name, metres away, bikes, e-bikes, open
+    docks"""
+    feed = feed.rstrip("/") + "/"
+    info = {s["station_id"]: s for s in get(feed + "station_information.json")["data"]["stations"]}
+    status = {s["station_id"]: s for s in get(feed + "station_status.json")["data"]["stations"]}
     out = []
     for sid, s in info.items():
         st = status.get(sid, {})   # a station with no status says so (None), not 0 bikes and open
@@ -144,14 +174,18 @@ def hexagon(d, x, y, r, fill, outline):
               fill=fill, outline=outline)
 
 
-def credit_for(view):
+WHERE = {"place": "HIVE76", "area": "Kensington", "bike_share": "INDEGO", "city": "City of Philadelphia"}
+
+
+def credit_for(view, where=WHERE):
     """the map's credit: only the data this view draws (the streets are always there)"""
-    return " · ".join(["© OpenStreetMap contributors"] + (["City of Philadelphia"] if view != "bikes" else [])
-                      + (["Indego"] if view in ("all", "bikes") else []))
+    return " · ".join(["© OpenStreetMap contributors"] + ([where["city"]] if view != "bikes" and where["city"] else [])
+                      + ([where["bike_share"].title()] if view in ("all", "bikes") and where["bike_share"] else []))
 
 
-def draw_map(view, lat, lon, radius, streets, city, bikes):
-    """the map: the streets, the El, the view's things, a ring at radius and Hive76 in the middle, RGB at screen size"""
+def draw_map(view, lat, lon, radius, streets, city, bikes, where=WHERE):
+    """the map: the streets, the El, the view's things, a ring at radius and the place in the middle, RGB at screen
+    size"""
     w, h = MAP_W // PIX, SCREEN[1] // PIX
     scale = (h / 2 - 6) / (radius * 1.08)                 # map pixels a metre: the ring just fits top to bottom
     to = lambda a, b: (w / 2 + metres(lat, lon, a, b)[0] * scale, h / 2 - metres(lat, lon, a, b)[1] * scale)
@@ -185,8 +219,8 @@ def draw_map(view, lat, lon, radius, streets, city, bikes):
         for s in (bikes or {}).get("stations", []):
             x, y = to(s["lat"], s["lon"])
             text(img, (round(x * PIX) + 10, round(y * PIX) - 8), count(s["bikes"]), WHITE, scale=1)
-    text(img, (round(cx * PIX) + 16, round(cy * PIX) - 8), "HIVE76", ORANGE, scale=1)
-    credit = credit_for(view)
+    text(img, (round(cx * PIX) + 16, round(cy * PIX) - 8), where["place"], ORANGE, scale=1)
+    credit = credit_for(view, where)
     ImageDraw.Draw(img).rectangle((6, SCREEN[1] - 28, 18 + len(credit) * 8, SCREEN[1] - 6), fill=BG)   # a backing, so the rail doesn't run through it
     text(img, (12, SCREEN[1] - 22), credit, GREY, scale=1)
     return img
@@ -220,14 +254,14 @@ def tally(rows, key):
     return sorted(counts.items(), key=lambda kv: -kv[1])
 
 
-def draw(now, view, lat, lon, radius, streets, city, bikes):
+def draw(now, view, lat, lon, radius, streets, city, bikes, where=WHERE):
     """the whole page, RGB at the screen's size"""
     img = Image.new("RGB", SCREEN, BG); d = ImageDraw.Draw(img)
-    img.paste(draw_map(view, lat, lon, radius, streets, city, bikes), (0, 0))
+    img.paste(draw_map(view, lat, lon, radius, streets, city, bikes, where), (0, 0))
     d.line((MAP_W, 0, MAP_W, SCREEN[1]), fill=RULE, width=2)
     hexagon(d, X0 + 14, 32, 14, ORANGE, None)
-    text(img, (X0 + 36, 10), "AROUND HIVE76", WHITE, scale=2)
-    text(img, (X0 + 36, 40), f"Kensington · {clock(now)}", GREY, scale=1)
+    text(img, (X0 + 36, 10), f"AROUND {where['place']}"[:30], WHITE, scale=2)
+    text(img, (X0 + 36, 40), " · ".join(x for x in (where["area"], clock(now)) if x), GREY, scale=1)
     for i, (key, label) in enumerate(VIEWS):   # the tabs, for touching
         x = TAB_X + i * (TAB_W + 8)
         on = key == view
@@ -247,12 +281,12 @@ def draw(now, view, lat, lon, radius, streets, city, bikes):
     if view == "all":
         cols = [(X0, "311 · 7 DAYS", len(reports), ORANGE, [f"{n:>3}  {k}" for k, n in tally(reports, "service_name")[:6]]),
                 (X0 + 360, "PERMITS · 30 DAYS", len(permits), LIGHT, [f"{n:>3}  {k}" for k, n in tally(permits, "permittype")[:6]]),
-                (X0 + 720, "INDEGO", near_bikes(stations[:4]), WHITE,
+                (X0 + 720, (where["bike_share"] or "BIKES")[:20], near_bikes(stations[:4]), WHITE,
                  [f"{count(s['bikes']):>2}  {s['name'][:24]}" for s in stations[:6]])]
         for x, title, big, colour, lines in cols:
             text(img, (x, Y), title, GREY, scale=1)
             text(img, (x, Y + 20), str(big), colour, scale=4)
-            text(img, (x + len(str(big)) * 32 + 10, Y + 52), ("bikes, some unknown" if big == "?" or big.endswith("+") else "bikes nearby") if title == "INDEGO" else "nearby", GREY, scale=1)
+            text(img, (x + len(str(big)) * 32 + 10, Y + 52), ("bikes, some unknown" if big == "?" or big.endswith("+") else "bikes nearby") if x == X0 + 720 else "nearby", GREY, scale=1)
             for i, line in enumerate(lines):
                 text(img, (x, Y + 100 + i * 24), line[:40], WHITE, scale=1)
         d.line((X0, Y + 258, R, Y + 258), fill=RULE)
@@ -303,10 +337,18 @@ class Page:
     """the blocks around Hive76, as a page of the kiosk's cycle"""
     name, seconds = "around", 30
 
-    def __init__(self, view="all", lat=HIVE76[0], lon=HIVE76[1], radius=1000, data=None):
+    def __init__(self, view="all", lat=HIVE76[0], lon=HIVE76[1], radius=1000, data=None, place="HIVE76",
+                 area="Kensington", bikes=INDEGO, bike_share="INDEGO", reports=PHL, permits=PHL):
         assert view in dict(VIEWS), f"view is one of {', '.join(dict(VIEWS))}"
+        for url in (bikes, reports):   # they're fetched, so only https, and only from a playlist someone wrote
+            assert url in (None, PHL) or isinstance(url, str) and url.startswith("https://"), "a source has to be an https address"
+        assert permits in (None, PHL), "permits are phl-carto or null"
         self.home = self.view = view
         self.lat, self.lon, self.radius = lat, lon, radius
+        self.sources = {"bikes": bikes, "reports": reports, "permits": permits}
+        city = "City of Philadelphia" if PHL in (reports, permits) else urllib.parse.urlsplit(reports).hostname if reports else ""
+        self.where = {"place": str(place).upper()[:16], "area": str(area or "")[:24], "city": city,
+                      "bike_share": str(bike_share).upper()[:16] if bikes else ""}
         self.fixed = data is not None
         self.streets, self.city, self.bikes = (data or {}).get("streets"), (data or {}).get("city"), (data or {}).get("bikes")
         self.busy, self.touched, self.bg, self.tried = False, 0.0, (None, None), {}
@@ -315,9 +357,16 @@ class Page:
     def caches(self):
         """(path, every, make) for the city's data and the bikes, each cached for its own middle (and radius)"""
         if not self.paths:
-            self.paths = (CACHE.format(lat=self.lat, lon=self.lon, radius=self.radius), BIKES.format(lat=self.lat, lon=self.lon))
-        return ((self.paths[0], EVERY, lambda: fetch_city(self.lat, self.lon, self.radius)),
-                (self.paths[1], BIKES_EVERY, lambda: fetch_bikes(self.lat, self.lon)))
+            # today's sources keep today's cache names; any other gets its own
+            src = lambda *k: "" if k in ((PHL, PHL), (INDEGO,)) else f"-{zlib.crc32(json.dumps(k).encode()):08x}"
+            s = self.sources
+            self.paths = (CACHE.format(lat=self.lat, lon=self.lon, radius=self.radius, src=src(s["reports"], s["permits"])),
+                          BIKES.format(lat=self.lat, lon=self.lon, src=src(s["bikes"])))
+        s = self.sources
+        return ((self.paths[0], EVERY, lambda: fetch_city(self.lat, self.lon, self.radius, s["reports"], s["permits"])),
+                (self.paths[1], BIKES_EVERY,
+                 (lambda: fetch_bikes(self.lat, self.lon, 6, s["bikes"])) if s["bikes"] else
+                 (lambda: {"stations": [], "fetched": datetime.now().isoformat(timespec="seconds")})))
 
     def due(self, path, every):
         """is a cache old (or missing) and not just tried: a failure leaves it old, and mustn't be asked every tick"""
@@ -368,7 +417,8 @@ class Page:
             self.view = self.home
         key = (self.view, now.minute, city_t, bikes_t, self.streets is not None)
         if key != self.bg[0]:
-            self.bg = (key, packed(draw(now, self.view, self.lat, self.lon, self.radius, self.streets, self.city, self.bikes)))
+            self.bg = (key, packed(draw(now, self.view, self.lat, self.lon, self.radius, self.streets, self.city, self.bikes,
+                                        self.where)))
         return self.bg
 
     def regions(self, now, t):
@@ -481,7 +531,7 @@ def check():
         globals()["STREETS"], globals()["get"] = real_streets, real_get
     assert "Indego" not in credit_for("reports") and "Philadelphia" not in credit_for("bikes") and "Indego" in credit_for("all")
     got = []; real_credit = credit_for
-    globals()["credit_for"] = lambda view: (got.append(view), real_credit(view))[1]
+    globals()["credit_for"] = lambda view, where=WHERE: (got.append(view), real_credit(view, where))[1]
     try:
         for view, _ in VIEWS:
             draw_map(view, *HIVE76, 1000, None, None, None)
@@ -503,6 +553,38 @@ def check():
     except AssertionError as err:
         assert "view is one of" in str(err)
 
+    # another city: Open311 for the reports, its own bike share, no permits, its own names
+    asked = []
+    def city_api(url, *a, **k):
+        asked.append(url)
+        return [{"service_name": "Pothole", "status": "open", "requested_datetime": "2026-10-15T10:00:00-07:00",
+                 "address": "1 Main St", "lat": 47.6205, "long": -122.3493},
+                {"service_name": "Far away", "requested_datetime": "2026-10-15T10:00:00Z", "lat": 48.0, "long": -122.0},
+                {"service_name": "No place", "requested_datetime": "2026-10-15T10:00:00Z"}]
+    real_get = globals()["get"]; globals()["get"] = city_api
+    try:
+        rows = open311("https://311.example.org/open311/v2/", 47.6205, -122.3493, 1000)
+    finally:
+        globals()["get"] = real_get
+    assert [r["service_name"] for r in rows] == ["Pothole"] and rows[0]["lon"] == -122.3493, "only what's near, with a place"
+    assert asked[0].startswith("https://311.example.org/open311/v2/requests.json?") and "start_date=" in asked[0], asked
+    seattle = Page(lat=47.6205, lon=-122.3493, place="Space Needle", area="Seattle", bikes=None,
+                   reports="https://311.example.org/open311/v2", permits=None)
+    assert seattle.caches()[1][2]()["stations"] == [], "no bike share: no stations, and nothing fetched"
+    assert "-" not in os.path.basename(Page().caches()[0][0]).split("_")[-1], "today's caches keep today's names"
+    assert Page(reports=None).caches()[0][0] != Page().caches()[0][0], "and another source gets its own"
+    for bad in ({"bikes": "http://gbfs.example.org/"}, {"reports": "ftp://x"}, {"permits": "https://permits.example.org"}):
+        try:
+            Page(**bad)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"took {bad}")
+    assert seattle.where["place"] == "SPACE NEEDLE" and seattle.where["city"] == "311.example.org" and not seattle.where["bike_share"]
+    assert "311.example.org" in credit_for("all", seattle.where) and "Indego" not in credit_for("all", seattle.where)
+    for view in dict(VIEWS):
+        assert draw(now, view, 47.6205, -122.3493, 1000, None, {"reports": rows, "permits": [], "fetched": now.isoformat()},
+                    {"stations": [], "fetched": now.isoformat()}, seattle.where).size == SCREEN, view
 
 def preview(now=None):
     """the overview with the sample, for the emulator and kiosk.py --png"""
