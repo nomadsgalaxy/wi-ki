@@ -2,7 +2,7 @@
  "name": "nowplaying",
  "kind": "page",
  "home": "public",
- "about": "whatever my desktop is playing, with lyrics and a live spectrum",
+ "about": "whatever my desktop is playing, with lyrics and a live spectrum. Needs the now-playing feed (feed/nowplaying.py) on the desktop it shows: feed/README.md has the steps.",
  "found": {
   "main": "4fe4c4"
  },
