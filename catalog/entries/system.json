@@ -2,7 +2,7 @@
  "name": "system",
  "kind": "page",
  "home": "public",
- "about": "my desktop's CPU, GPU, memory and network, live. The owner will pick what it shows, but the code doesn't do that yet",
+ "about": "my desktop's CPU, GPU, memory and network, live. The owner will pick what it shows, but the code doesn't do that yet. Needs the system feed (feed/sysfeed.py) on the desktop it shows: feed/README.md has the steps.",
  "found": {
   "main": "e0da7d"
  },

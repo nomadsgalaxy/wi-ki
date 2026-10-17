@@ -11,18 +11,18 @@ Installing a pack asks for anything it needs a fresh API token or a server for, 
 | name | kind | home | what it is | versions | needs | quality |
 |---|---|---|---|---|---|---|
 | home | page | core | the touch launcher: a tile for every page | one, on main `d883df` | touch | unchecked |
-| agents | page | public | how much of each AI plan I've used, and what my herdr workspaces are doing. The owner will pick what it shows, but the code doesn't do that yet | one, on main `ec7979` | asks: feed, render server | unchecked |
+| agents | page | public | how much of each AI plan I've used, and what my herdr workspaces are doing. The owner will pick what it shows, but the code doesn't do that yet. Needs the desk feed (feed/deskfeed.py), with herdr and KodexBar, on the desktop it shows: feed/README.md has the steps. | one, on main `ec7979` | asks: feed, render server | unchecked |
 | around | page | public | the blocks around a place: 311 reports, permits and bike-share stations (Hive76 and Philadelphia's open data by default; any city's Open311 and GBFS feeds) | one, on main `005634` | gbfs.bcycle.com, overpass-api.de, overpass.private.coffee, phl.carto.com | unchecked |
 | calendar | page | public | the next two weeks, with each day's weather and events | one, on main `9a33ff` | – | unchecked |
 | cfradar | page | public | Pennsylvania's internet traffic, from Cloudflare Radar | one, on main `70adfa` | api.cloudflare.com, secret: a Cloudflare API token with Radar Read, asks: a Cloudflare API token with Radar Read | unchecked |
 | flyers | page | public | how long since the Flyers won the Cup | one, on main `1846e5` | – | unchecked |
-| github | page | public | open PRs, issues and recent pushes for our three orgs | one, on main `1209b6` | asks: feed, render server | unchecked |
+| github | page | public | open PRs, issues and recent pushes for our three orgs. Needs the desk feed (feed/deskfeed.py) on the desktop whose GitHub it shows: feed/README.md has the steps. | one, on main `1209b6` | asks: feed, render server | unchecked |
 | halflife3 | page | public | is Half-Life 3 out yet? | one, on main `ed36be` | store.steampowered.com | unchecked |
-| nowplaying | page | public | whatever my desktop is playing, with lyrics and a live spectrum | one, on main `4fe4c4` | asks: folder, render server | unchecked |
+| nowplaying | page | public | whatever my desktop is playing, with lyrics and a live spectrum. Needs the now-playing feed (feed/nowplaying.py) on the desktop it shows: feed/README.md has the steps. | one, on main `4fe4c4` | asks: folder, render server | unchecked |
 | radar | page | public | what's flying overhead, on a live map | one, on main `8e2f4a` | api.adsb.lol, api.adsbdb.com, mesonet.agron.iastate.edu, opendata.adsb.fi, overpass-api.de, overpass.private.coffee | unchecked |
 | septa | page | public | is SEPTA fucked? Installing it asks whether to say "fcked" (sfw) | one, on main `a3f531` | isseptafucked.com, asks: sfw | unchecked |
 | sports | page | public | every Philly team's score, next game and record | one, on main `cded34` | site.api.espn.com, a.espncdn.com | unchecked |
-| system | page | public | my desktop's CPU, GPU, memory and network, live. The owner will pick what it shows, but the code doesn't do that yet | one, on main `e0da7d` | asks: file, render server | unchecked |
+| system | page | public | my desktop's CPU, GPU, memory and network, live. The owner will pick what it shows, but the code doesn't do that yet. Needs the system feed (feed/sysfeed.py) on the desktop it shows: feed/README.md has the steps. | one, on main `e0da7d` | asks: file, render server | unchecked |
 | weather | page | public | Philly's skyline playing the real weather, and the forecast | one, on main `0ca1f8` | api.open-meteo.com | unchecked |
 | coreone | transition | public | the page is printed layer by layer by a hotend | one, on main `9f47db` | – | unchecked |
 | hackerman | transition | public | a neon terminal hacks time while the page glitches in | one, on main `859d09` | – | unchecked |
