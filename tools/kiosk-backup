@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""kiosk-backup: keep a copy of each kiosk's own settings (~/.config/kiosk/) in a git repo, so a dead SD card can be
+set up again the way it was. It runs on a desktop that can SSH to the kiosks, and pulls: the kiosks hold no key to the
+backups, so one kiosk can never change another's.
+
+  kiosk-backup DIR NAME=SSH-TARGET ...     copy each kiosk's settings into DIR/NAME/, and commit what changed
+  kiosk-backup --restore DIR NAME SSH-TARGET   put NAME's settings back on a kiosk (only ever when asked)
+  kiosk-backup --check                     self-test
+
+DIR is a checkout of the backups repo. KIOSK_SSH_OPTS adds options to every ssh, like the agent a timer should use.
+For example:
+  kiosk-backup ~/wi-ki-configs home-desk=kiosk@desk-kiosk.local home-server=kiosk@10.1.140.1
+
+Only settings, never secrets: the setup page's login (admin-login.json) and certificates (tls/) stay on the kiosk, the
+shared key in remote.json is left out, and a file that still looks like it holds a key or a token is refused. Restoring
+puts the settings back without them, so a restored kiosk gets a new first-boot login and its key set by hand.
+"""
+import json, os, re, subprocess, sys, tempfile
+
+FILES = ("branch", "config.json", "playlist.json", "transitions-off.json", "remote.json", "eventsync.json",
+         "installed.json", "packs.json")   # packs.json: which repos, at which commits, so a restore can install them again
+SECRET = re.compile(r"-----BEGIN|\b[0-9a-f]{64}\b|\b(gh[pousr]|github_pat|sk|xox[bp])[-_][A-Za-z0-9_-]{16,}|op://", re.I)
+
+
+def scrub(name, text):
+    """a settings file as it goes into the backups: remote.json without its key; anything else that looks secret
+    raises ValueError, so it's never committed"""
+    if name == "remote.json":
+        data = json.loads(text)
+        if isinstance(data, dict) and "key" in data:
+            data["key"] = "set on the kiosk"
+        text = json.dumps(data, indent=1) + "\n"
+    if SECRET.search(text):
+        raise ValueError(f"{name} looks like it holds a key or a token, so it isn't backed up")
+    return text
+
+
+def ssh(target, command, stdin=None):
+    extra = os.environ.get("KIOSK_SSH_OPTS", "").split()   # e.g. -o IdentityAgent=<an agent's socket>, for a timer
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", *extra, target, command], input=stdin,
+                          capture_output=True, text=True, timeout=60)
+
+
+def fetch(target):
+    """-> {file: text} for the settings files a kiosk has"""
+    script = ("import json, os; d = os.path.expanduser('~/.config/kiosk'); "
+              f"print(json.dumps({{f: open(os.path.join(d, f)).read() for f in {list(FILES)!r} if os.path.isfile(os.path.join(d, f))}}))")
+    got = ssh(target, f'python3 -I -c "{script}"')
+    if got.returncode:
+        raise OSError(f"{target}: {got.stderr.strip()[-200:] or 'ssh failed'}")
+    return json.loads(got.stdout)
+
+
+def save(folder, name, files):
+    """write one kiosk's settings into folder/name/, removing files it no longer has; -> what changed"""
+    out = os.path.join(folder, name)
+    os.makedirs(out, exist_ok=True)
+    clean = {f: scrub(f, text) for f, text in files.items()}   # all checked before anything's written
+    changed = []
+    for f in FILES:
+        path = os.path.join(out, f)
+        if f in clean:
+            if not os.path.exists(path) or open(path).read() != clean[f]:
+                open(path, "w").write(clean[f]); changed.append(f)
+        elif os.path.exists(path):
+            os.remove(path); changed.append(f)
+    return changed
+
+
+def backup(folder, kiosks, fetcher=fetch):
+    """every kiosk's settings into the checkout, one commit for what changed; a kiosk that can't be reached keeps its
+    last backup -> {name: changed files or the error}"""
+    report = {}
+    for name, target in kiosks:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", name):
+            report[name] = "a name is lowercase letters, digits and dashes"; continue
+        try:
+            report[name] = save(folder, name, fetcher(target))
+        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+            report[name] = str(e)
+    git = lambda *a: subprocess.run(["git", "-C", folder, *a], capture_output=True, text=True)
+    git("add", "-A")
+    if git("diff", "--cached", "--quiet").returncode:
+        names = ", ".join(n for n, c in report.items() if isinstance(c, list) and c)
+        git("commit", "-q", "-m", f"Back up {names}")
+    return report
+
+
+def restore(folder, name, target):
+    """put a kiosk's backed-up settings back on it, without the key in remote.json (that's set by hand)"""
+    out = os.path.join(folder, name)
+    files = {f: open(os.path.join(out, f)).read() for f in FILES if os.path.exists(os.path.join(out, f))}
+    if "remote.json" in files:
+        data = json.loads(files["remote.json"]); data.pop("key", None); files["remote.json"] = json.dumps(data) + "\n"
+    script = ("import json, os, sys; d = os.path.expanduser('~/.config/kiosk'); os.makedirs(d, exist_ok=True)\n"
+              "for f, t in json.load(sys.stdin).items():\n"
+              "    p = os.path.join(d, f); open(p + '.tmp', 'w').write(t); os.chmod(p + '.tmp', 0o600); os.replace(p + '.tmp', p)")
+    got = ssh(target, f"python3 -I -c \"{script}\"", json.dumps(files))
+    if got.returncode:
+        raise OSError(got.stderr.strip()[-200:])
+    return sorted(files)
+
+
+def check():
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(["git", "init", "-q", d], check=True)
+        subprocess.run(["git", "-C", d, "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", d, "config", "user.name", "t"], check=True)
+        key = "ab" * 32
+        kiosk = {"playlist.json": '[{"page": "weather"}]\n', "remote.json": json.dumps({"server": "10.0.0.9", "key": key}),
+                 "config.json": '{"id": "k-7f3a2c"}', "admin-login.json": "not asked for, so never fetched"}
+        fake = {"one": lambda: {f: v for f, v in kiosk.items() if f in FILES}, "away": lambda: (_ for _ in ()).throw(OSError("away"))}
+        got = backup(d, [("home-desk", "one"), ("office", "away"), ("Bad Name", "one")], lambda t: fake[t]())
+        assert sorted(got["home-desk"]) == ["config.json", "playlist.json", "remote.json"], got
+        assert got["office"] == "away" and "lowercase" in got["Bad Name"], got
+        saved = open(os.path.join(d, "home-desk", "remote.json")).read()
+        assert key not in saved and "set on the kiosk" in saved, "the shared key stays on the kiosk"
+        assert not os.path.exists(os.path.join(d, "home-desk", "admin-login.json"))
+        log = subprocess.run(["git", "-C", d, "log", "--oneline"], capture_output=True, text=True).stdout
+        assert log.count("\n") == 1 and "Back up home-desk" in log, log
+        assert backup(d, [("home-desk", "one")], lambda t: fake[t]()) == {"home-desk": []}, "nothing changed, nothing committed"
+        assert subprocess.run(["git", "-C", d, "log", "--oneline"], capture_output=True, text=True).stdout.count("\n") == 1
+        for name, text in (("playlist.json", '[{"page": "x", "options": {"token": "ghp_' + "a" * 36 + '"}}]'),
+                           ("eventsync.json", '{"key": "' + "cd" * 32 + '"}'), ("config.json", "-----BEGIN PRIVATE KEY-----"),
+                           ("eventsync.json", '{"token": "op://Private/thing/credential"}')):
+            leaky = dict(kiosk, **{name: text})
+            got = backup(d, [("home-desk", "one")], lambda t: {f: v for f, v in leaky.items() if f in FILES})
+            assert "looks like it holds a key" in got["home-desk"], (name, got)
+        assert open(os.path.join(d, "home-desk", "playlist.json")).read() == kiosk["playlist.json"], "a refused backup keeps the last"
+    print("kiosk-backup: ok")
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if a == ["--check"]:
+        check()
+    elif len(a) == 4 and a[0] == "--restore":
+        print("restored:", ", ".join(restore(*a[1:])))
+    elif len(a) >= 2 and all("=" in k for k in a[1:]):
+        for name, result in backup(os.path.expanduser(a[0]), [k.split("=", 1) for k in a[1:]]).items():
+            print(f"{name}: {', '.join(result) or 'no change' if isinstance(result, list) else 'not backed up: ' + result}")
+    else:
+        sys.exit(__doc__)
