@@ -5,6 +5,8 @@
 # them: the hostname (KIOSK_HOSTNAME, default "kiosk"), timezone, the kiosk user with sudo and your SSH key (password
 # logins over SSH are off), and the Wi-Fi. It asks for the passwords (or takes KIOSK_PASSWORD and KIOSK_WIFI_PASS from
 # the environment). The Wi-Fi password goes onto the card (it has to), the kiosk user's password only as a hash.
+# It also gives the card its ID, k-<6 hex> (or KIOSK_ID), in ~/.config/kiosk/config.json, and prints it. With
+# KIOSK_SETUP=1 the kiosk's setup page is on from the first boot: the screen shows the address and a first-boot login.
 #
 # Unattended: set KIOSK_UNATTENDED=1 and the Pi sets itself up completely on first boot, for a kiosk on a network you
 # can't reach: it installs what it needs, clones the repo (it's public, so no key), puts the code in place
@@ -25,8 +27,12 @@ unset KIOSK_PASSWORD
 export KIOSK_UNATTENDED="${KIOSK_UNATTENDED:-}"
 
 python3 -I - "$boot" <<'EOF'
-import json, os, sys
+import json, os, re, sys
 boot, e = sys.argv[1], os.environ
+card = e.get("KIOSK_ID") or "k-" + os.urandom(3).hex()
+if not re.fullmatch(r"k-[0-9a-f]{6}", card):
+    sys.exit(f"KIOSK_ID must look like k-7f3a2c, not {card!r}")
+settings = {"id": card, **({"setup": True} if e.get("KIOSK_SETUP") else {})}
 q = json.dumps   # a JSON string is a valid YAML string, so odd characters in a password can't break the file
 open(f"{boot}/user-data", "w").write(f"""#cloud-config
 hostname: {q(e["KIOSK_HOSTNAME"])}
@@ -42,8 +48,16 @@ users:
       - {q(e["KIOSK_KEY"])}
 enable_ssh: true
 ssh_pwauth: false
+write_files:
+  - path: /home/kiosk/.config/kiosk/config.json
+    owner: kiosk:kiosk
+    permissions: "0600"
+    defer: true
+    content: |
+      {json.dumps(settings)}
 runcmd:
   - systemctl enable --now ssh
+  - chown -R kiosk:kiosk /home/kiosk/.config
 """ + ("""  - DEBIAN_FRONTEND=noninteractive apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y python3-pil git
   - runuser -u kiosk -- git clone -q https://github.com/nomadsgalaxy/wi-ki.git /home/kiosk/HiveKiosk
   - python3 -I /home/kiosk/HiveKiosk/kiosk/autoupdate.py
@@ -72,6 +86,7 @@ for extra in ("consoleblank=0", "cfg80211.ieee80211_regdom=US", "systemd.show_st
         cmdline += " " + extra   # never blank the screen, Wi-Fi region, no boot chatter on the console
 open(f"{boot}/cmdline.txt", "w").write(cmdline + "\n")
 print("first-boot files written to", boot, "(unattended)" if e["KIOSK_UNATTENDED"] else "")
+print(f"card ID: {card}" + (", with its setup page on" if settings.get("setup") else ""))
 EOF
 sync
 if [ -n "$KIOSK_UNATTENDED" ]; then

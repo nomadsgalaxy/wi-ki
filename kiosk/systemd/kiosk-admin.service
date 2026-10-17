@@ -1,0 +1,40 @@
+[Unit]
+Description=Wi-Ki: the setup page, at https://<the kiosk's address> (only with "setup": true; see admin.py)
+# a Zero has no clock of its own: the certificate's dates only mean something once the time is set
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
+# updates turn this on like any service with an [Install] section, but admin.py only opens a port when the kiosk's
+# config.json says "setup": true, and otherwise exits straight away, so no update can open one by itself
+
+[Service]
+User=kiosk
+ExecStart=/usr/bin/python3 -I /home/kiosk/kiosk/admin.py
+# the display comes first: a login's scrypt (about 8 s, 43 MB on a Zero) mustn't stutter it or run the Zero out of memory
+Nice=10
+MemoryMax=128M
+# ports 443 and 80 without being root, and nothing else
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+# it sees its own code and what autoupdate applied (read-only) and its own settings, and nothing else of the kiosk
+# user's home (no SSH keys)
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/kiosk/kiosk -/home/kiosk/.cache/kiosk
+BindPaths=/home/kiosk/.config/kiosk
+# /run/kiosk: the first-boot login for the kiosk's own screen, in RAM, gone when this stops
+RuntimeDirectory=kiosk
+RuntimeDirectoryMode=0700
+PrivateTmp=yes
+# IP, local sockets, and netlink, which `ip` needs to find the kiosk's addresses
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# a floor under the firewall step: only local and private networks can reach it at all
+IPAddressDeny=any
+IPAddressAllow=localhost link-local 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+# it exits 0 when it isn't allowed to start (stay off), and 1 when its address, code or certificate changed or the
+# clock isn't set yet (come back, but not so often that a network without NTP fills the journal)
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

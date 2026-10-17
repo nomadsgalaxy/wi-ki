@@ -45,6 +45,10 @@ A kiosk can have a render server (`kiosk.py --serve`, named in the kiosk's `~/.c
 
 Every page and transition is in `catalog/`, with an entry in `catalog/entries/<name>.json`: what it is, its licence and its art's credits, the shapes it draws, the services it calls and the settings it takes. `catalog/catalog.py --check` holds each entry against the code on `origin/main`, so a new page or transition needs an entry, and a change to one usually needs its `found` hash updated (`--draft page <name>` shows what the code says). `--table` rewrites `CATALOG.md`. The player (`kiosk/transitions/__init__.py`) and `canvas.py` are the engine's and stay in `kiosk/`.
 
+## The setup page
+
+`kiosk/admin.py` is the kiosk's setup page, and it's security code: it faces whatever network the kiosk is on. Keep its rules when you change it: HTTPS only, its own addresses and local networks only, the form token and the same-origin check on every change, the login throttle, and nothing secret in its log. `kiosk/setup_check.py` tests those rules, and `kiosk.py --check` runs it. A new setting writes the same files `kiosk.py` reads (`playlist.json`, `transitions-off.json`), checked first (`config.validate_playlist()`), and is refused on a kiosk that shows a render server.
+
 ## Per-kiosk settings
 
 Every kiosk runs the same code. What makes one different lives on it, in `~/.config/kiosk/`, which updates never touch: `branch` (what to follow; `main` if it's missing), `playlist.json`, `transitions-off.json`, `remote.json` (its render server) and `eventsync.json` (its calendar's sources). Without one, the repo's copy is used, and with no `remote.json` the kiosk draws its own pages. Never put one kiosk's settings in the repo.
