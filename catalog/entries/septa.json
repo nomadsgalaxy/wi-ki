@@ -1,0 +1,38 @@
+{
+ "name": "septa",
+ "kind": "page",
+ "home": "public",
+ "about": "is SEPTA fucked? Installing it asks whether to say \"fcked\" (sfw)",
+ "found": {
+  "main": "a3f531"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "isseptafucked.com"
+  ],
+  "secrets": []
+ },
+ "settings": {
+  "sfw": false
+ },
+ "ask": [
+  "sfw"
+ ],
+ "licence": {
+  "code": "MIT",
+  "assets": "SEPTA's line bullets and colours; the verdict from isseptafucked.com (Douglas Muth)",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

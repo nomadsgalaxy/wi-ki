@@ -1,0 +1,36 @@
+{
+ "name": "github",
+ "kind": "page",
+ "home": "public",
+ "about": "open PRs, issues and recent pushes for our three orgs",
+ "found": {
+  "main": "1209b6"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "server",
+  "touch": false,
+  "services": [],
+  "secrets": []
+ },
+ "settings": {
+  "feed": "~/.cache/kiosk/desk.json"
+ },
+ "ask": [
+  "feed"
+ ],
+ "licence": {
+  "code": "MIT",
+  "assets": "drawn in code",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

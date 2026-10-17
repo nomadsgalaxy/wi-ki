@@ -1,0 +1,32 @@
+{
+ "name": "nomadsgalaxy",
+ "kind": "transition",
+ "home": "public",
+ "about": "warp: Warp Cyan beams, and the Drifter flies through",
+ "found": {
+  "main": "fec696"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [],
+  "secrets": []
+ },
+ "settings": {},
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "Nomads Galaxy's Drifter (kiosk/art/drifter.png)",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

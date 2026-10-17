@@ -1,0 +1,35 @@
+{
+ "name": "sports",
+ "kind": "page",
+ "home": "public",
+ "about": "every Philly team's score, next game and record",
+ "found": {
+  "main": "cded34"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "site.api.espn.com",
+   "a.espncdn.com"
+  ],
+  "secrets": []
+ },
+ "settings": {},
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "ESPN's team logos, shrunk to pixels. They're there as identifiers: we don't sell them or claim them",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}
