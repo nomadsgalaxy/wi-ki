@@ -4,7 +4,7 @@
  "home": "public",
  "about": "Philly's skyline playing the real weather, and the forecast",
  "found": {
-  "main": "5a086f"
+  "main": "0ca1f8"
  },
  "shapes": [
   "bar"
@@ -18,14 +18,15 @@
   "secrets": []
  },
  "settings": {
-  "lat": 39.704,
-  "lon": -75.241,
-  "place": "PHILADELPHIA"
+  "lat": null,
+  "lon": null,
+  "place": null,
+  "landscape": null
  },
  "ask": [],
  "licence": {
   "code": "MIT",
-  "assets": "the skyline is traced from \"The Philadelphia skyline (cropped)\" by Mefman00, CC BY-SA 4.0, and the pixel art is shared under CC BY-SA 4.0 too, not the code's licence",
+  "assets": "the skyline is traced from \"The Philadelphia skyline (cropped)\" by Mefman00, CC BY-SA 4.0, and the pixel art is shared under CC BY-SA 4.0 too, not the code's licence; landscapes in catalog/landscapes/ keep their own (each one's landscape.json)",
   "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
  },
  "quality": {
