@@ -4,13 +4,15 @@ the ones that are), pointing where it's heading and coloured by height: amber lo
 Beside it (below it, on a tall screen), a compact list of the nearest flights, one line each: callsign, route, type,
 altitude, speed and how far away. It lays itself out for the shape it's drawn in (kit.SHAPES): the bar, 16:9, or 9:16.
 
-Aircraft come from adsb.lol (no key) every 20 seconds and fly on along their track between fetches, redrawn every
-second (moved()). Told to slow down (429), it waits a minute. Routes and airlines come from adsbdb.com (no key, cached
-per callsign). Both run in a background thread so the display never waits on the network. Under them is a street map,
-so you can see what they're over: main roads, rivers, the bigger towns and the airports (by their code) from
-OpenStreetMap (the Overpass API, fetched once and cached on disk), drawn as quiet pixel lines in the brand's colours. Altitude is in feet and speed in
-knots, the way aviation counts them; distances are in km. Under the roads is the live weather radar: the NEXRAD
-composite from the Iowa Environmental Mesonet's map tiles (no key, every 5 minutes), in brand colours by strength.
+Aircraft come from adsb.lol (no key) every minute, or from adsb.fi (no key, the same data) when adsb.lol doesn't answer,
+and fly on along their track between fetches, redrawn every second (moved()). A source that fails is left alone for 10
+minutes, so a dead one doesn't hold up every fetch, and one that says slow down (429) is left for a minute. Routes and
+airlines come from adsbdb.com (no key, cached per callsign). Both run in a background thread so the display never waits
+on the network. Under them is a street map, so you can see what they're over: main roads, rivers, the bigger towns and
+the airports (by their code) from OpenStreetMap (the Overpass API, fetched once and cached on disk), drawn as quiet
+pixel lines in the brand's colours. Altitude is in feet and speed in knots, the way aviation counts them; distances are
+in km. Under the roads is the live weather radar: the NEXRAD composite from the Iowa Environmental Mesonet's map tiles
+(no key, every 5 minutes), in brand colours by strength.
 
 Options (in playlist.json): lat and lon, the middle of the map (default: central Philadelphia; the playlist sets it to
 home); radius, in nautical miles (default 25, about 46 km).
@@ -39,7 +41,9 @@ BEACON = (255, 58, 58)
 # the Pi Zero, drawing by itself while the render server's away: a redraw takes it 1.3 s (the server 10 ms), so there
 # it redraws only on each fetch, instead of every second
 SLOW = os.uname().machine.startswith("arm")
-EVERY, ROUTES_PER_FETCH, BACKOFF = 20, 2, 60   # the planes glide between fetches, so a fetch every 20 s looks live
+EVERY, ROUTES_PER_FETCH, BACKOFF, DOWN = 60, 2, 60, 600   # the planes glide between fetches, so a fetch a minute looks live
+FEEDS = (("adsb.lol", "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}", "ac"),   # the same data, in the same shape
+         ("adsb.fi", "https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{nm}", "aircraft"))
 ROADS = {"primary": (22, 46, 56), "trunk": (40, 80, 96), "motorway": (60, 120, 140)}   # drawn in this order, dim first
 RIVER = (40, 55, 120)
 AIRPORT = W
@@ -191,7 +195,7 @@ def helicopter(track, colour):
 
 
 def aircraft(raw):
-    """adsb.lol's list -> [{callsign, type, reg, alt, speed, track, dist (nm), bearing, heli}], nearest first. heli is
+    """adsb.lol's (or adsb.fi's) list -> [{callsign, type, reg, alt, speed, track, dist (nm), bearing, heli}], nearest first. heli is
     the ADS-B emitter category A7, rotorcraft"""
     out = []
     for a in raw:
@@ -204,11 +208,11 @@ def aircraft(raw):
 
 
 def moved(planes, seconds):
-    """planes flown on along their track at their ground speed for seconds since adsb.lol saw them (a minute at most,
-    so a feed that's gone quiet doesn't fly them away), nearest first again. Ones on the ground stay put."""
+    """planes flown on along their track at their ground speed for seconds since they were last seen (two fetches at
+    most, so a feed that's gone quiet doesn't fly them away), nearest first again. Ones on the ground stay put."""
     if not planes or seconds <= 0:
         return planes
-    hours, out = min(seconds, 60) / 3600, []
+    hours, out = min(seconds, 2 * EVERY) / 3600, []
     for p in planes:
         if p["alt"] == "ground" or not p["speed"] or p["track"] is None:
             out.append(p); continue
@@ -277,7 +281,8 @@ class Page:
     def __init__(self, lat=39.95, lon=-75.17, radius=25, planes=None):
         self.lat, self.lon, self.radius = lat, lon, radius
         self.planes, self.routes, self.fetched, self.error = planes, {}, (time.time() if planes else 0), None
-        self.seen, self.wait = None, 0.0   # when adsb.lol last answered (the planes fly on from there); no fetch till wait
+        self.seen, self.wait = None, 0.0   # when a feed last answered (the planes fly on from there); no fetch till wait
+        self.down, self.source = {}, FEEDS[0][0]   # feed -> left alone until; the one that answered last
         self.fixed, self.busy, self.bg = planes is not None, False, (None, None)
         self.base, self.mapped = basemap(None, lat, lon, radius), 0.0   # the street map comes in the background
         self.rain, self.rained = None, 0.0
@@ -285,7 +290,7 @@ class Page:
     def fetch(self):
         """the aircraft, then a few routes we don't know yet (in a thread)"""
         try:
-            self.planes = aircraft(get(f"https://api.adsb.lol/v2/point/{self.lat}/{self.lon}/{math.ceil(self.radius * REACH)}").get("ac", []))
+            self.planes, self.source = self.flights()
             self.fetched = self.seen = time.time(); self.error = None
             for p in [p for p in self.planes if p["callsign"] not in self.routes][:ROUTES_PER_FETCH]:
                 try:
@@ -322,6 +327,21 @@ class Page:
                 pass
         self.busy = False
 
+    def flights(self):
+        """-> (the aircraft, the feed they came from): the first feed that answers, skipping ones that just failed"""
+        last = None
+        for name, url, key in FEEDS:
+            if time.time() < self.down.get(name, 0):
+                continue
+            try:
+                raw = get(url.format(lat=self.lat, lon=self.lon, nm=math.ceil(self.radius * REACH)))
+                self.down.pop(name, None)
+                return aircraft(raw.get(key) or []), name
+            except Exception as e:
+                self.down[name] = time.time() + (BACKOFF if getattr(e, "code", None) == 429 else DOWN)
+                last = e
+        raise last or OSError("every feed is resting")
+
     def start(self, now):
         pass   # background() fetches, in a thread, when it's time
 
@@ -331,7 +351,7 @@ class Page:
         live = self.seen and not SLOW   # the planes fly on, redrawn every second
         key = (self.fetched, len(self.routes), now.minute, int(time.time()) if live else 0)
         if key != self.bg[0]:
-            note = (f"no data: {self.error}", A) if self.error else (f"adsb.lol · every {EVERY} s", D)
+            note = (f"no data: {self.error}", A) if self.error else (f"{self.source} · every {EVERY} s", D)
             planes = moved(self.planes, time.time() - self.seen) if live else self.planes
             self.bg = (key, packed(draw(now, planes, self.routes, self.radius, note, self.base)))
         return self.bg
@@ -367,7 +387,7 @@ def check():
     parked = dict(south, callsign="P", alt="ground")
     assert [(p["callsign"], round(p["dist"], 3), round(p["bearing"])) for p in moved([south, parked], 60)] == \
         [("S", 4, 0), ("P", 10, 0)], "6 nm closer after a minute at 360 kt; the parked one stays"
-    assert moved([south], 600)[0]["dist"] == moved([south], 60)[0]["dist"], "never more than a minute's worth"
+    assert moved([south], 600)[0]["dist"] == moved([south], 2 * EVERY)[0]["dist"], "never more than two fetches' worth"
     east = moved([dict(south, track=90)], 60)[0]
     assert round(east["bearing"]) == 31 and round(east["dist"], 2) == 11.66, east
     global get
@@ -383,7 +403,23 @@ def check():
     assert page.routes == {"T0": {}} and len(calls) == 3, "a 404 means no route; a 429 stops asking and asks again later"
     get = lambda url: (_ for _ in ()).throw(urllib.error.HTTPError(url, 429, "", {}, None))
     page.fetch()
-    assert page.wait > time.time() + BACKOFF - 5 and page.error, "adsb.lol's 429: wait a minute"
+    assert page.wait > time.time() + BACKOFF - 5 and page.error, "every feed's 429: wait a minute"
+    # adsb.lol away: adsb.fi has the same data, and adsb.lol is left alone for a while instead of costing every fetch
+    def lol_down(url):
+        calls.append(url)
+        if "adsb.lol" in url:
+            raise urllib.error.URLError("refused")
+        if "adsb.fi" in url:
+            return {"aircraft": [{"flight": "F1", "dst": 2, "dir": 90}]}
+        raise urllib.error.HTTPError(url, 404, "", {}, None)
+    calls.clear(); get, page = lol_down, Page()
+    page.mapped = page.rained = time.time() + 999
+    page.fetch()
+    assert page.source == "adsb.fi" and page.planes[0]["callsign"] == "F1" and not page.error, page.error
+    page.fetch()
+    assert sum("adsb.lol" in u for u in calls) == 1, "a feed that failed is left alone for a while"
+    page.down["adsb.lol"] = 0; get = fake; page.fetch()
+    assert page.source == "adsb.lol", "and asked first again once that's over"
     get = real
     assert height("ground") == G and height(5000) == A and height(20000) == O and height(36000) == B
     now = datetime(2026, 10, 15, 0, 50)
