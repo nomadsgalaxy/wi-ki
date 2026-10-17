@@ -1,0 +1,11 @@
+[Unit]
+Description=Wi-Ki: update from GitHub if main has moved
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /home/kiosk/kiosk/autoupdate.py
+# the display comes first: on a single-core Zero these wait for spare CPU and disk
+Nice=19
+IOSchedulingClass=idle

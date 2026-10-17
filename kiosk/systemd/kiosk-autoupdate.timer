@@ -1,0 +1,10 @@
+[Unit]
+Description=Wi-Ki: check GitHub for updates 3 minutes after boot and every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,36 @@
+{
+ "name": "system",
+ "kind": "page",
+ "home": "public",
+ "about": "my desktop's CPU, GPU, memory and network, live. The owner will pick what it shows, but the code doesn't do that yet",
+ "found": {
+  "main": "e0da7d"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "server",
+  "touch": false,
+  "services": [],
+  "secrets": []
+ },
+ "settings": {
+  "file": "/dev/shm/kiosk-system.json"
+ },
+ "ask": [
+  "file"
+ ],
+ "licence": {
+  "code": "MIT",
+  "assets": "drawn in code",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

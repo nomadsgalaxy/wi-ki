@@ -1,0 +1,13 @@
+[Unit]
+Description=Stream what's playing to the desk kiosk's now playing page
+After=graphical-session.target
+
+[Service]
+Environment=KIOSK_HOST=kiosk@kiosk.local
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/wi-ki/feed/nowplaying.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
