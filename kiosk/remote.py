@@ -138,8 +138,9 @@ def read(sock, n):
     return bytes(data)
 
 
-def client(address, mm, play=transitions.play):
-    """the Pi's side: put what the server sends on the screen, until the link drops (then it raises)"""
+def client(address, mm, play=transitions.play, stop=None):
+    """the Pi's side: put what the server sends on the screen, until the link drops (then it raises) or stop() says
+    the Pi has something of its own to show. The server pings every few seconds, so that's checked often enough."""
     sock = socket.create_connection(address, timeout=5)
     sock.settimeout(TIMEOUT)
     print(f"remote: showing {address[0]}:{address[1]}", flush=True)
@@ -155,6 +156,9 @@ def client(address, mm, play=transitions.play):
                 o = (a + i) * STRIDE + x * 2; mm[o:o + w2] = rect[i * w2:(i + 1) * w2]
         elif kind == b"TRAN":
             play(mm, zlib.decompress(payload[a:]), payload[:a].decode())
+        if stop and stop():
+            sock.close()
+            return
 
 
 def check():
@@ -169,7 +173,9 @@ def check():
     seen, mm = [], bytearray(SIZE)
     def fake_play(mm, frame, name):
         seen.append(name); mm[:] = frame
-    threading.Thread(target=lambda: client(("127.0.0.1", port), mm, fake_play), daemon=True).start()
+    done = threading.Event()
+    pi = threading.Thread(target=lambda: client(("127.0.0.1", port), mm, fake_play, stop=done.is_set), daemon=True)
+    pi.start()
     for _ in range(100):
         if server.conn:
             break
@@ -189,5 +195,7 @@ def check():
             break
         time.sleep(0.02)
     assert mm == server.mm, "and keeps up after the transition"
+    done.set(); server.mm[0:2] = b"\x0a\x0a"; server.flush(); pi.join(5)
+    assert not pi.is_alive(), "stop() hands the screen back to the Pi at the next message"
     server.listener.close()
     print("remote: ok")

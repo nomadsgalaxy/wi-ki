@@ -43,6 +43,7 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves our own folder off the path
 import kit, remote, transitions, web  # noqa: E402
+from pages import setup as setup_page  # noqa: E402
 
 FPS = 4
 # the bar's are the ones control.py and kiosk-ctl use; a browser shape keeps its own, so pinning the Pi leaves it be
@@ -218,6 +219,7 @@ def main(screen, until=None):
     for p in pages:
         if hasattr(p, "pages"):   # the home page: it shows the others
             p.pages = pages
+    pages = pages + [setup_page.Page()]   # its fingerprint reminder, in the rotation only when active() says so
     steering, mm = ("start", None, None), screen.mm
     index, since, shown, drawn, moving = -1, 0.0, None, {}, False
     touched = os.path.getmtime(TOUCH) if os.path.exists(TOUCH) else None
@@ -231,6 +233,12 @@ def main(screen, until=None):
                         mm[:] = kit.rgb565(rescue_screen(info)); shown = ("rescue", info); screen.flush()
                 except (OSError, ValueError):
                     pass
+                time.sleep(1)
+                continue
+            if setup_page.urgent() and screen.visible():   # the first-boot login: on this screen, ahead of every page
+                info = setup_page.read()
+                if shown != ("setup", info):
+                    mm[:] = kit.rgb565(setup_page.draw(*info)); shown = ("setup", info); screen.flush()
                 time.sleep(1)
                 continue
             mtime = os.path.getmtime(TOUCH) if os.path.exists(TOUCH) else None
@@ -323,10 +331,11 @@ def display():
     try:
         if where:
             try:
-                remote.client(where, screen.mm)
+                remote.client(where, screen.mm, stop=setup_page.urgent)   # the Setup page is only ever drawn here
             except Exception as e:   # unreachable, hung up, or garbled: draw it ourselves
                 print(f"remote: {e}; drawing locally for now", file=sys.stderr)
-        main(screen, until=back(where) if where else None)
+        ready = back(where) if where else None
+        main(screen, until=(lambda: ready() and not setup_page.urgent()) if where else None)
     finally:
         screen.close()
 
@@ -341,6 +350,8 @@ def check():
         print(f"{name}: ok")
     importlib.import_module("eventsync").check()
     importlib.import_module("control").check()
+    for name in ("config", "admin", "setup_check"):   # the setup page and the rules it has to keep
+        importlib.import_module(name).check()
     transitions.check()
     remote.check()
     web.check()
