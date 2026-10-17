@@ -78,6 +78,7 @@ def update():
     if new == read(REFUSED):
         return log(f"{new[:7]} failed its tests before; waiting for a newer commit")
     kiosk("git", "reset", "--quiet", "--hard", new)
+    kiosk("git", "clean", "-q", "-ffdx")   # and nothing left over that git doesn't track, like an old page's caches
     subject = kiosk("git", "log", "-1", "--format=%s", new)
     log(f"testing {new[:7]}: {subject}")
     # the new code goes in beside the running one, and the smoke test runs on exactly that, so a folder put together
