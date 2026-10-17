@@ -20,7 +20,7 @@ NoNewPrivileges=yes
 # user's home (no SSH keys)
 ProtectSystem=strict
 ProtectHome=tmpfs
-BindReadOnlyPaths=/home/kiosk/kiosk -/home/kiosk/.cache/kiosk
+BindReadOnlyPaths=/home/kiosk/kiosk -/home/kiosk/.cache/kiosk -/home/kiosk/.local/share/kiosk
 BindPaths=/home/kiosk/.config/kiosk
 # /run/kiosk: the first-boot login for the kiosk's own screen, in RAM, gone when this stops
 RuntimeDirectory=kiosk

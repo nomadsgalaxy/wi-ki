@@ -1,0 +1,10 @@
+[Unit]
+Description=Wi-Ki: watch for the setup page asking to install, update or remove a page or transition
+
+[Path]
+# the setup page writes its request here; the service carries it out (packs.py)
+PathChanged=/home/kiosk/.config/kiosk/packs-request.json
+Unit=kiosk-packs.service
+
+[Install]
+WantedBy=paths.target

@@ -8,8 +8,9 @@ this, and one that says nothing is a Pi (remote.py). Every message is signed wit
 and each carries the time and a one-off nonce, so a recorded one can't be played back. Without a key on both, the
 setup page only shows the settings.
 
-  CONF  a=64, then the HMAC-SHA256 of the body in hex, then the body: {"op": "get"} or {"op": "put", "playlist": [...],
-        "off": [...]} (either or both), plus "t" and "nonce"
+  CONF  a=64, then the HMAC-SHA256 of the body in hex, then the body: {"op": "get"}, {"op": "put", "playlist": [...],
+        "off": [...]} (either or both), or {"op": "packs", "request": {...}} to install, update or remove a page or
+        transition there (packs.py), plus "t" and "nonce"
   the reply: CONF a=0, then {"ok": true, ...} or {"ok": false, "error": "..."}
 
 Standard library only, and nothing heavy: the setup page imports this, and it shares a Zero with the display.
@@ -113,9 +114,28 @@ def themes(folder=os.path.join(HERE, "transitions")):
     return sorted(f[:-3] for f in os.listdir(folder) if f.endswith(".py") and f not in ("__init__.py", "canvas.py"))
 
 
+def present(here=HERE):
+    """the pages and transitions this machine has right now, catalog and repo packs alike"""
+    share = os.path.expanduser("~/.local/share/kiosk")
+    pages = {n for d in (os.path.join(here, "pages"), os.path.join(share, "pages")) if os.path.isdir(d) for n in os.listdir(d)
+             if os.path.isfile(os.path.join(d, n, "__init__.py")) and n != "setup"}
+    return {"pages": sorted(pages), "transitions": themes(os.path.join(here, "transitions")) +
+            sorted(set(themes(os.path.join(share, "transitions"))) if os.path.isdir(os.path.join(share, "transitions")) else [])}
+
+
+def pack_request(req):
+    """a request for packs.py, checked the way the setup page checks it -> the request, or ValueError"""
+    if not isinstance(req, dict) or req.get("op") not in ("install", "remove", "update", "check"):
+        raise ValueError("that isn't a request for a page or transition")
+    if any(not isinstance(v, str) or len(v) > 300 for v in req.values()):
+        raise ValueError("that request isn't plain text")
+    return {k: req[k] for k in ("id", "op", "kind", "name", "source", "repo", "ref") if k in req}
+
+
 def settings(message, conf=CONF, here=HERE, restart=None):
-    """handle() for the server: "get" -> its playlist and the transitions it skips; "put" -> saves them, checked first,
-    then restarts its display so they take effect"""
+    """handle() for the server: "get" -> its playlist, the transitions it skips, and what it has installed; "put" ->
+    saves them, checked first, then restarts its display so they take effect; "packs" -> passes a request to install,
+    update or remove something to its own packs.py"""
     playlist, repo, off = os.path.join(conf, "playlist.json"), os.path.join(here, "playlist.json"), os.path.join(conf, "transitions-off.json")
     names = themes(os.path.join(here, "transitions"))
     if message.get("op") == "get":
@@ -124,8 +144,20 @@ def settings(message, conf=CONF, here=HERE, restart=None):
             skipped = json.load(open(off))
         except (OSError, ValueError):
             skipped = []
+        read = lambda f, default: json.load(open(os.path.join(conf, f))) if os.path.exists(os.path.join(conf, f)) else default
         return {"ok": True, "playlist": json.load(open(playlist if own else repo)), "own": own,
-                "off": [n for n in skipped if n in names] if isinstance(skipped, list) else [], "themes": names}
+                "off": [n for n in skipped if n in names] if isinstance(skipped, list) else [], "themes": names,
+                "present": present(here), "packs": read("packs.json", {}), "status": read("packs-status.json", {})}
+    if message.get("op") == "packs":
+        try:
+            req = pack_request(message.get("request"))
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        os.makedirs(conf, mode=0o700, exist_ok=True)
+        with open(os.path.join(conf, "packs-request.json.tmp"), "w") as f:
+            json.dump(req, f)
+        os.replace(os.path.join(conf, "packs-request.json.tmp"), os.path.join(conf, "packs-request.json"))
+        return {"ok": True}
     if message.get("op") != "put" or not ({"playlist", "off"} & set(message)):
         return {"ok": False, "error": "that isn't something it does"}
     writes = []
@@ -199,6 +231,16 @@ def check():
                 assert says in str(e), (says, e)
             else:
                 raise AssertionError(f"accepted {message}")
+        assert ask({"op": "packs", "request": {"id": "x1", "op": "install", "source": "catalog", "kind": "page", "name": "septa"}}) == {"ok": True}
+        assert json.load(open(f"{d}/conf/packs-request.json"))["name"] == "septa", "it's the server's packs.py that carries it out"
+        for bad in ({"op": "format"}, "install", {"op": "install", "name": ["x"]}):
+            try:
+                ask({"op": "packs", "request": bad})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"passed on {bad}")
+        assert "present" in ask({"op": "get"}), "and it says what it has"
         # a message that's been seen, or is old, doesn't work again
         body = json.dumps({"op": "get", "t": time.time(), "nonce": "once"}).encode()
         old = json.dumps({"op": "get", "t": time.time() - WINDOW - 5, "nonce": "old"}).encode()

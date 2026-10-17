@@ -51,6 +51,7 @@ Each kiosk keeps its own settings in `~/.config/kiosk/`. The updates never touch
 | `remote.json` | its render server: `{"server": "<address>", "port": 7676}` | it draws its own pages |
 | `eventsync.json` | where the calendar's events come from | no events |
 | `config.json` | the card's ID, and `"setup": false` to turn its setup page off | the setup page is on, wherever there's a screen |
+| `installed.json`, `packs.json` | what's installed beyond the core, from the catalog and from repos (the setup page keeps them) | just the core |
 | `admin-login.json` | the setup page's login, as a hash (the setup page writes it) | the first-boot login on the screen |
 
 The setup page changes `playlist.json` and `transitions-off.json` for you, on a kiosk that draws its own pages.
@@ -80,6 +81,21 @@ A kiosk can host its own setup page, so you can change its pages, transitions an
 
 It only serves HTTPS, on the kiosk's own addresses and only to local networks. Logins slow down after 5 wrong tries, and every change has to come from the page itself. `kiosk/admin.py` has the details, and `kiosk/setup_check.py` tests them. Setting a kiosk up by name (`https://k-<id>.kiosk.local`) is built in but stays off until the kiosks have their own certificate authority.
 
+## Installing pages and transitions
+
+A kiosk comes with a small core: the weather, radar and calendar pages, and the Nomads Galaxy and Matrix transitions (`kiosk/core.json`). Everything else is installed from the setup page's **Install** tab, and taken off again there. A page in the playlist stays installed until you take it out of the playlist, and the core always stays.
+
+**From the catalog.** Every page and transition in `catalog/` has been reviewed before it was merged. A kiosk installs them from its own copy of the repo, so they're always the version that goes with its code, and its updates keep them up to date.
+
+**From someone's repo.** Anyone can publish a page or a transition on GitHub, and a kiosk can install it from there. Nobody has reviewed that code, and it runs with the kiosk's own access, so the setup page asks you to say you understand that before it installs one. Only install from people you trust. It's pinned to the exact commit it was installed at, so it never changes by itself; **Check for updates** says when there's a newer one, and **Update** installs it. Before it's switched on, the kiosk loads it in a separate process and has it draw once, so one that's plainly broken doesn't get installed.
+
+To publish one, put these at the top of a GitHub repo:
+
+- **`wiki-pack.json`:** `{"name": "clock", "kind": "page", "about": "a big clock", "licence": "MIT"}`. The kind is `page` or `transition`, and the name is lowercase letters, digits and `_`, and can't be one the catalog already has.
+- **The code:** a page is a folder named after it (`clock/`, with `__init__.py` exporting `Page`, `check()` and `preview()`, like the catalog's pages); a transition is one file (`clock.py`, with `frames(canvas, count)`). `AGENTS.md` has the rules that keep them working on a Pi Zero.
+
+A pack holds `.py`, `.json`, `.png`, `.txt` and `.md` files only, up to 200 of them and 8 MB, with no links. On a kiosk whose pages a render server draws, the setup page installs on the server too (pages run there; transitions play on the Pi, so they go on both). `kiosk/packs.py` has the details.
+
 ## The render server
 
 A Pi Zero is slow at drawing but quick at copying, so a kiosk can have a render server draw its pages while the Pi just shows them. A server is any small Linux box or container (Debian, 2 cores and 1 GB is plenty) running the same code as `kiosk.py --serve` (the `kiosk-serve` service). It updates itself from `main` the same way the Pi does. Setting one up is the same as a Pi, minus the screen: `deploy/deploy.sh`, then `setup/pi-setup.sh` as root. With no `/dev/fb0`, it installs `kiosk-serve` instead of the tty1 login. Then point the Pi at it with `~/.config/kiosk/remote.json`.
@@ -98,7 +114,7 @@ Shapes are in `kit.SHAPES`, and a process draws the one `KIOSK_SHAPE` names. A p
 
 `CATALOG.md` lists everything in the catalog, with what each needs. To add a page, make `catalog/pages/<name>/` exporting `Page`, `check()` and `preview()`, give it an entry (`python3 -I catalog/catalog.py --draft page <name>` starts one), then add it to a playlist. `kiosk/kiosk.py` describes the interface, `catalog/pages/calendar` is a simple example, and `AGENTS.md` has the rules.
 
-Between pages, a transition plays for about 3 seconds, taking turns: **CoreOne** (the new page is printed layer by layer by a zig-zagging hotend), **Hive76** (honeycomb cells fill with honey and open onto it, while a bee flies past), **Nomads Galaxy** (warp: it opens from the middle between beams, and the Drifter flies through), **The Matrix** (forty columns of code rain, with the new page showing through behind each one), **Hackerman** (a neon terminal hacks time while the page glitches in) and **Johnny 5** (a comic page: he rolls in and strikes, and the new page comes through). Nothing flashes the whole screen, so they're safe for anyone sensitive to flicker. A kiosk can turn any of them off in `transitions-off.json`.
+Between pages, a transition plays for about 3 seconds, and the ones a kiosk has installed take turns. The catalog has: **CoreOne** (the new page is printed layer by layer by a zig-zagging hotend), **Hive76** (honeycomb cells fill with honey and open onto it, while a bee flies past), **Nomads Galaxy** (warp: it opens from the middle between beams, and the Drifter flies through), **The Matrix** (forty columns of code rain, with the new page showing through behind each one), **Hackerman** (a neon terminal hacks time while the page glitches in) and **Johnny 5** (a comic page: he rolls in and strikes, and the new page comes through). Nothing flashes the whole screen, so they're safe for anyone sensitive to flicker. A kiosk can turn any of them off in `transitions-off.json`.
 
 ### The desktop pages
 
