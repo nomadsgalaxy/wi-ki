@@ -1,0 +1,45 @@
+{
+ "name": "cfradar",
+ "kind": "page",
+ "home": "public",
+ "about": "Pennsylvania's internet traffic, from Cloudflare Radar",
+ "found": {
+  "main": "70adfa"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "api.cloudflare.com"
+  ],
+  "secrets": [
+   "a Cloudflare API token with Radar Read"
+  ]
+ },
+ "settings": {
+  "geo": 6254927,
+  "name": "PENNSYLVANIA",
+  "asns": [
+   7922,
+   701
+  ]
+ },
+ "ask": [
+  "a Cloudflare API token with Radar Read"
+ ],
+ "licence": {
+  "code": "MIT",
+  "assets": "data from Cloudflare Radar; the layout follows Radar's",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

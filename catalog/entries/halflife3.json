@@ -1,0 +1,34 @@
+{
+ "name": "halflife3",
+ "kind": "page",
+ "home": "public",
+ "about": "is Half-Life 3 out yet?",
+ "found": {
+  "main": "ed36be"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "store.steampowered.com"
+  ],
+  "secrets": []
+ },
+ "settings": {},
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "Half-Life's Lambda and HUD, Valve's trademarks",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

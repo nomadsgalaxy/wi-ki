@@ -1,0 +1,34 @@
+{
+ "name": "flyers",
+ "kind": "page",
+ "home": "public",
+ "about": "how long since the Flyers won the Cup",
+ "found": {
+  "main": "1846e5"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [],
+  "secrets": []
+ },
+ "settings": {
+  "won": "1975-05-27"
+ },
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "Gritty and the winged P, the Flyers' trademarks",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine; the assets keep their own licences"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

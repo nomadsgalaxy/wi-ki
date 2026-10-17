@@ -1,0 +1,12 @@
+[Unit]
+Description=Wi-Ki: collect the calendar's events
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kiosk
+ExecStart=/usr/bin/python3 -I /home/kiosk/kiosk/eventsync.py
+# the display comes first: on a single-core Zero these wait for spare CPU and disk
+Nice=19
+IOSchedulingClass=idle
