@@ -3,7 +3,7 @@
 (systemd/kiosk-autoupdate.*); the git work and the tests run as the kiosk user.
 
 Each run:
-1. fetches main into the Pi's clone (~/HiveKiosk, pulled with a read-only deploy key) and stops if nothing changed
+1. fetches main into the Pi's clone (~/HiveKiosk, pulled over https: the repo is public) and stops if nothing changed
    since the last commit it applied;
 2. runs the smoke test on the new code (every page loads and draws; the full check is too slow for a Zero, so that
    runs before pushing), and stops if it fails (and won't try that commit again);

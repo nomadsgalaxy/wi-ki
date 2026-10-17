@@ -35,7 +35,7 @@ The Pi is `kiosk@kiosk.local` unless you set `KIOSK_HOST`. SSH is key-only.
 
 ## Updates
 
-**Pushing to `main` deploys to every kiosk.** Every 10 minutes each kiosk checks GitHub (with a read-only deploy key). When `main` has moved, it runs a quick smoke test on the new code, and only if that passes does it swap it in and restart the display. A commit that fails is skipped until a newer one arrives. So run `python3 -I kiosk/kiosk.py --check` before you push: the full check takes about 10 minutes on a Zero, which is why the Pi only runs the quick one.
+**Pushing to `main` deploys to every kiosk.** Every 10 minutes each kiosk checks GitHub. The repo is public, so it pulls over https and needs no key. When `main` has moved, it runs a quick smoke test on the new code, and only if that passes does it swap it in and restart the display. A commit that fails is skipped until a newer one arrives. So run `python3 -I kiosk/kiosk.py --check` before you push: the full check takes about 10 minutes on a Zero, which is why the Pi only runs the quick one.
 
 On the Pi, `sudo python3 -I ~/kiosk/autoupdate.py --status` shows what's applied and what's on GitHub, and `journalctl -u kiosk-autoupdate` shows what it did. `deploy/deploy.sh` still works for trying something before it's on `main`. It stays on the Pi until `main` moves again.
 
@@ -57,10 +57,10 @@ Each kiosk keeps its own settings in `~/.config/kiosk/`. The updates never touch
 2. With the card's boot partition mounted: `setup/firstboot.sh /run/media/$USER/bootfs`. It asks for the Wi-Fi name and password and a password for the `kiosk` user, and writes cloud-init's first-boot files (hostname `kiosk`, your SSH key, no password logins over SSH).
 3. Boot the Pi and give it 2–3 minutes.
 4. `deploy/deploy.sh` puts the code on the Pi.
-5. `deploy/as-root.sh setup/pi-setup.sh` installs Pillow and git, sets tty1 to log in and run the kiosk, and starts the timers (event sync and auto-update). It asks for the `kiosk` password. The first time, it prints a deploy key: add it on GitHub under the repo's Settings > Deploy keys (read-only), then run it once more.
+5. `deploy/as-root.sh setup/pi-setup.sh` installs Pillow and git, sets tty1 to log in and run the kiosk, and starts the timers (event sync and auto-update). It also clones the repo for the updates. It asks for the `kiosk` password.
 6. Reboot the Pi.
 
-**For a kiosk on a network you can't reach** (so you can't run steps 4 and 5 over SSH), make a read-only deploy key for it on GitHub (Settings > Deploy keys), then in step 2 run `KIOSK_HOSTNAME=<name> KIOSK_DEPLOY_KEY=<private key file> setup/firstboot.sh <boot partition>`. The card then sets itself up on first boot (about 15 minutes on a Zero): it installs what it needs, clones the repo, puts the code in place, runs `pi-setup.sh`, removes the key from its boot partition and reboots into the kiosk. After that it updates itself like any other kiosk.
+**For a kiosk on a network you can't reach** (so you can't run steps 4 and 5 over SSH), run step 2 as `KIOSK_HOSTNAME=<name> KIOSK_UNATTENDED=1 setup/firstboot.sh <boot partition>`. The card then sets itself up on first boot (about 15 minutes on a Zero): it installs what it needs, clones the repo, puts the code in place, runs `pi-setup.sh` and reboots into the kiosk. After that it updates itself like any other kiosk.
 
 Then give it its own settings in `~/.config/kiosk/`, if it needs any.
 
