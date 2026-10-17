@@ -2,9 +2,9 @@
  "name": "around",
  "kind": "page",
  "home": "public",
- "about": "the blocks around Hive76: 311 reports, permits and Indego bikes",
+ "about": "the blocks around a place: 311 reports, permits and bike-share stations (Hive76 and Philadelphia's open data by default; any city's Open311 and GBFS feeds)",
  "found": {
-  "main": "491b99"
+  "main": "005634"
  },
  "shapes": [
   "bar"
@@ -24,7 +24,13 @@
   "view": "all",
   "lat": null,
   "lon": null,
-  "radius": 1000
+  "radius": 1000,
+  "place": "HIVE76",
+  "area": "Kensington",
+  "bikes": null,
+  "bike_share": "INDEGO",
+  "reports": null,
+  "permits": null
  },
  "ask": [],
  "licence": {

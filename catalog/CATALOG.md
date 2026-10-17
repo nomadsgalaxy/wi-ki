@@ -12,7 +12,7 @@ Installing a pack asks for anything it needs a fresh API token or a server for, 
 |---|---|---|---|---|---|---|
 | home | page | core | the touch launcher: a tile for every page | one, on main `d883df` | touch | unchecked |
 | agents | page | public | how much of each AI plan I've used, and what my herdr workspaces are doing. The owner will pick what it shows, but the code doesn't do that yet | one, on main `ec7979` | asks: feed, render server | unchecked |
-| around | page | public | the blocks around Hive76: 311 reports, permits and Indego bikes | one, on main `491b99` | gbfs.bcycle.com, overpass-api.de, overpass.private.coffee, phl.carto.com | unchecked |
+| around | page | public | the blocks around a place: 311 reports, permits and bike-share stations (Hive76 and Philadelphia's open data by default; any city's Open311 and GBFS feeds) | one, on main `005634` | gbfs.bcycle.com, overpass-api.de, overpass.private.coffee, phl.carto.com | unchecked |
 | calendar | page | public | the next two weeks, with each day's weather and events | one, on main `9a33ff` | – | unchecked |
 | cfradar | page | public | Pennsylvania's internet traffic, from Cloudflare Radar | one, on main `70adfa` | api.cloudflare.com, secret: a Cloudflare API token with Radar Read, asks: a Cloudflare API token with Radar Read | unchecked |
 | flyers | page | public | how long since the Flyers won the Cup | one, on main `1846e5` | – | unchecked |
