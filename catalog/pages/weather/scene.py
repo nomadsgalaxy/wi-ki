@@ -12,9 +12,21 @@ crowns light up, and their lights glint in the water.
 
 Everything is drawn at ART (300x128) and scaled up 4x with no smoothing, so each art pixel is a crisp 4x4 block.
 
-  scene.draw(w, now, t) -> 300x128 RGB image. w is Open-Meteo JSON, now a datetime, t seconds (the animation clock).
+Or someone's own landscape, from the catalog's landscapes/<name>/, in place of Philadelphia's:
+
+  landscape.png   exactly 300x128, RGBA, 64 colours or fewer and 64 KB at most. Clear pixels are sky; the rest is the
+                  land, drawn at that size. It's lit by the time of day the way the skyline is.
+  windows.png     optional, 300x128, white where lights come on through dusk
+  water.png       optional, 300x128, white where it's water: the land and sky mirror there below the waterline, rippling
+  leaves.png      optional, 300x128, white where leaves are: they take the season's colours, by how light each one is
+  landscape.json  {"name", "place" (the heading), "lat", "lon" (the forecast's default), "waterline" (a row),
+                   "strike" ([x, y], where lightning hits), "credit": {"author", "licence", "source"}}; the licence is
+                   one of LICENCES, and anything traced from a photo credits the photo in "source"
+
+  scene.draw(w, now, t, land=None) -> 300x128 RGB image. w is Open-Meteo JSON, now a datetime, t seconds (the animation
+  clock), land a landscape's name, or None for Philadelphia.
 """
-import hashlib, math, os
+import hashlib, json, math, os, re
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -193,7 +205,7 @@ def foliage(img, blobs, greens, seed, night=False, bare=0, accents=()):
 # colours sampled from it. The Schuylkill Banks Boardwalk sweeps across the bottom right on its piers.
 WATERLINE = 92                                                                  # the far bank, mirrored about here
 RIVER = [(0, 92), (300, 92), (300, 128), (0, 128)]
-def land():
+def land_shape():
     """the ground right of where the boardwalk leaves the shore: from the tree line down to the boardwalk's far railing,
     and on the right down to the foot of the retaining wall. None of it is river."""
     far = []
@@ -336,7 +348,7 @@ def city(light, golden, now_seed, glow, month=6):
     for x in (4, 12): r.line((x, 87, x, 92), fill=tint((96, 104, 100)))
     r.rectangle((0, 90, 48, 92), fill=tint((110, 112, 110)))
     # the right bank: the path on land with its railing, the retaining wall under it, graffiti on the far part
-    r.polygon(land(), fill=tint((52, 48, 40)))
+    r.polygon(land_shape(), fill=tint((52, 48, 40)))
     r.rectangle((156, 110, 300, 112), fill=tint((176, 180, 186)))
     for x in range(156, 300): r.point((x, 108), fill=tint((200, 206, 214)))
     for x in range(156, 300, 3): r.line((x, 108, x, 110), fill=tint((150, 158, 170)))
@@ -458,47 +470,159 @@ def layer_key(light, golden, weather, now):
     return (round(light, 2), round(golden, 2), cover, dark, precip, now.month) + clock, glow
 
 
-def moment(w, now):
+def moment(w, now, land=None):
     """a key for the loop draw() makes at `now`: the layers, the wind, and where the sun or moon is if it's out. Two
     moments with the same key look the same, so the weather page can replay one loop instead of drawing it again"""
     light, golden, arc, sunup = daylight(w, now)
     weather = weather_of(w["current"]["weather_code"])
-    key = layer_key(light, golden, weather, now)[0] + (wind_of(w),)
+    key = layer_key(light, golden, weather, now)[0] + (wind_of(w), land)
     cover, _, precip, _, fog = weather
     if cover < 0.85 and not precip and not fog:
         key += (round(arc * ARC), sunup) + (() if sunup else (round(moon(now) * PHASES),))
     return key
 
 
+# --- landscapes: someone's own scene in place of Philadelphia's (landscapes/<name>/, from the catalog) ---
+LANDSCAPES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "landscapes")   # the repo's and a kiosk's
+LICENCES = ("CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "CC-BY-3.0", "CC-BY-SA-3.0")   # open, so anyone's kiosk can show it
+MOST_BYTES, MOST_COLOURS = 64 * 1024, 64
+MASKS = ("windows", "water", "leaves")   # where lights come on at dusk, what reflects and ripples, what turns with the seasons
+LIT = (255, 214, 140)
+_lands = {}
+
+
+def landscape_problems(folder):
+    """what's wrong with a landscape's folder, for people: [] if nothing"""
+    try:
+        meta = json.load(open(os.path.join(folder, "landscape.json")))
+    except (OSError, ValueError) as e:
+        return [f"landscape.json won't read: {e}"]
+    if not isinstance(meta, dict):
+        return ["landscape.json is an object"]
+    missing = {"name", "place", "lat", "lon", "waterline", "strike", "credit"} - set(meta)
+    if missing:
+        return [f"landscape.json needs {', '.join(sorted(missing))}"]
+    out = []
+    credit = meta["credit"] if isinstance(meta["credit"], dict) else {}
+    if not all(isinstance(credit.get(k), str) and credit[k] for k in ("author", "licence", "source")):
+        out.append("credit needs author, licence and source")
+    if credit.get("licence") not in LICENCES:
+        out.append(f"the licence is one of {', '.join(LICENCES)}")
+    num = lambda v, lo, hi: isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi
+    if not (num(meta["lat"], -90, 90) and num(meta["lon"], -180, 180)):
+        out.append("lat and lon are a place on Earth")
+    if not (isinstance(meta["waterline"], int) and not isinstance(meta["waterline"], bool) and 0 <= meta["waterline"] <= ART[1]):
+        out.append(f"waterline is a row, 0 to {ART[1]}")
+    strike = meta["strike"]
+    if not (isinstance(strike, list) and len(strike) == 2 and num(strike[0], 0, ART[0] - 1) and num(strike[1], 0, ART[1] - 1)):
+        out.append("strike is [x, y], where lightning hits")
+    if not (isinstance(meta["place"], str) and 0 < len(meta["place"]) <= 24):
+        out.append("place is 1 to 24 characters, for the heading")
+    for name in ("landscape",) + MASKS:
+        path = os.path.join(folder, name + ".png")
+        if not os.path.exists(path):
+            if name == "landscape":
+                out.append("landscape.png is missing")
+            continue
+        if os.path.getsize(path) > MOST_BYTES:
+            out.append(f"{name}.png is over {MOST_BYTES // 1024} KB")
+            continue
+        try:
+            img = Image.open(path); img.load()
+        except OSError as e:
+            out.append(f"{name}.png won't open: {e}"); continue
+        if img.size != ART:
+            out.append(f"{name}.png is {img.size[0]}x{img.size[1]}, not {ART[0]}x{ART[1]}")
+        elif name == "landscape" and img.convert("RGBA").getcolors(MOST_COLOURS) is None:
+            out.append(f"landscape.png has more than {MOST_COLOURS} colours")
+    return out
+
+
+def landscape(name):
+    """a landscape, loaded once: landscape.json's settings, its art and its masks (None where it has none)"""
+    if name not in _lands:
+        folder = os.path.join(LANDSCAPES, str(name))
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,30}", str(name)) or not os.path.isdir(folder):
+            raise ValueError(f"there's no landscape called {name!r}")
+        problems = landscape_problems(folder)
+        if problems:
+            raise ValueError(f"{name}: " + "; ".join(problems))
+
+        def mask(n):
+            path = os.path.join(folder, n + ".png")
+            return Image.open(path).convert("L").point(lambda v: 255 if v > 127 else 0) if os.path.exists(path) else None
+        meta = json.load(open(os.path.join(folder, "landscape.json")))
+        _lands[name] = {**meta, "art": Image.open(os.path.join(folder, "landscape.png")).convert("RGBA"),
+                        **{n: mask(n) for n in MASKS}}
+    return _lands[name]
+
+
+def land_layer(land, light, golden, now_seed, glow, month):
+    """a landscape's art as the scene's land: its leaves in the season's colours, lit by the time of day like the
+    skyline is, and its windows coming on one by one through dusk"""
+    art = land["art"].copy()
+    if land["leaves"] is not None:   # each leaf pixel takes the season's colour for how light it is
+        greens = SEASONS[season(month)][0]
+        seasonal = art.convert("L").point(lambda v: min(3, v // 64)).convert("P")
+        seasonal.putpalette([c for g in greens for c in g] + [0] * (768 - 12))
+        art.paste(seasonal.convert("RGB"), (0, 0), land["leaves"])
+    sun, warm = 0.45 + 0.55 * light, (255, 196, 140)
+    a = golden * 0.25 * light if golden else 0.0
+    r, g, b, alpha = art.split()
+    out = Image.merge("RGBA", [band.point(lambda v, w=w: round(min(255, v * sun) * (1 - a) + w * a))
+                               for band, w in zip((r, g, b), warm)] + [alpha])
+    if land["windows"] is not None and glow > 0:
+        px, wx = out.load(), land["windows"].load()
+        for y in range(ART[1]):
+            for x in range(ART[0]):
+                if wx[x, y] and rand(7, x, y, now_seed) < 0.42 * glow:
+                    px[x, y] = mix(px[x, y][:3], LIT, glow) + (255,)
+    return out
+
+
 _cache = {}
 
 
-def layers(w, now):
+def layers(w, now, land=None):
     """everything that only changes every few minutes, cached"""
     light, golden, arc, sunup = daylight(w, now)
     cover, dark, precip, amount, fog = weather_of(w["current"]["weather_code"])
     key, glow = layer_key(light, golden, (cover, dark, precip), now)
+    key += (land,)
     if key not in _cache:
         _cache.clear()
         top, mid, low, warm = sky_colours(light, golden, cover, dark)
-        _cache[key] = {"sky": sky(top, mid, low), "city": city(light, golden, now.hour * 12 + now.minute // 5, glow, now.month),
-                       "fore": foreground(light, golden, glow, now.month, precip), "glow": glow,
+        seed = now.hour * 12 + now.minute // 5
+        if land:
+            ls = landscape(land)
+            ground, front = land_layer(ls, light, golden, seed, glow, now.month), Image.new("RGBA", ART, (0, 0, 0, 0))
+            top_row, strike = ls["waterline"], tuple(ls["strike"])
+        else:
+            ground, front = city(light, golden, seed, glow, now.month), foreground(light, golden, glow, now.month, precip)
+            top_row, strike = WATER_TOP, (168, 22)   # One Liberty's spire
+        _cache[key] = {"sky": sky(top, mid, low), "city": ground, "fore": front, "glow": glow, "water_top": top_row,
+                       "strike": strike,
                        "clouds": [cloud(i, 26 + int(rand(50, i) * 40), light, dark, warm) for i in range(int(cover * 9))],
                        "water": shade(mix(low, (40, 80, 110), 0.35), 0.85), "deep": shade((34, 56, 50), 0.4 + 0.6 * light)}
         # the water mirrors the sky and the city about the waterline, blended once here; each frame only shifts its
         # rows to ripple them, then pastes them through the channel's shape
         L = _cache[key]
         above = L["sky"].copy(); above.paste(L["city"], (0, 0), L["city"])
-        rows = []
-        for y in range(WATER_TOP, 128):
-            src = above.crop((0, max(0, round(2 * WATERLINE - y * 1.0 - (y - WATERLINE) * 0.1)), 300, 1 + max(0, round(2 * WATERLINE - y * 1.0 - (y - WATERLINE) * 0.1))))
+        rows, line = [], L["water_top"]   # the waterline: the far bank, mirrored about here
+        for y in range(line, 128):
+            src = above.crop((0, max(0, round(2 * line - y * 1.0 - (y - line) * 0.1)), 300, 1 + max(0, round(2 * line - y * 1.0 - (y - line) * 0.1))))
             # far water is dark and green (the trees and the bridge's shadow), near water mirrors the sky
-            tone = mix(L["deep"], L["water"], (y - WATERLINE) / 40)
-            rows.append(Image.blend(src, Image.new("RGB", (300, 1), tone), 0.45 if y >= WATERLINE else 0.75))
+            tone = mix(L["deep"], L["water"], (y - line) / 40)
+            rows.append(Image.blend(src, Image.new("RGB", (300, 1), tone), 0.45))
         L["refl"] = rows
-        mask = Image.new("L", (300, 128 - WATER_TOP), 0); md = ImageDraw.Draw(mask)
-        md.polygon([(x, y - WATER_TOP) for x, y in RIVER], fill=255); md.polygon([(x, y - WATER_TOP) for x, y in land()], fill=0)
-        L["mask"] = mask
+        if land:   # what reflects is what the landscape says is water; with no water mask, nothing does
+            water = landscape(land)["water"]
+            L["mask"] = water.crop((0, line, 300, 128)) if water is not None else Image.new("L", (300, 128 - line), 0)
+        else:
+            mask = Image.new("L", (300, 128 - WATER_TOP), 0); md = ImageDraw.Draw(mask)
+            md.polygon([(x, y - WATER_TOP) for x, y in RIVER], fill=255)
+            md.polygon([(x, y - WATER_TOP) for x, y in land_shape()], fill=0)
+            L["mask"] = mask
     return _cache[key], (light, golden, arc, sunup), (cover, dark, precip, amount, fog)
 
 
@@ -531,8 +655,8 @@ def paths(cover, precip, amount, wind):
     return _paths[key]
 
 
-def draw(w, now, t):
-    L, (light, golden, arc, sunup), (cover, dark, precip, amount, fog) = layers(w, now)
+def draw(w, now, t, land=None):
+    L, (light, golden, arc, sunup), (cover, dark, precip, amount, fog) = layers(w, now, land)
     light, golden = round(light, 2), round(golden, 2)   # as the key has them, so one key always draws one picture
     img = L["sky"].copy(); d = ImageDraw.Draw(img, "RGBA")
     t = t % LOOP
@@ -576,7 +700,7 @@ def draw(w, now, t):
     # the water: the mirrored rows rippling (more the closer they are), glints drifting downstream, rain splashes,
     # all pasted through the shape of the channel and the main river
     water = L["water"]
-    wh = 128 - WATER_TOP
+    wh = 128 - L["water_top"]
     wimg = Image.new("RGB", (300, wh), water); wd = ImageDraw.Draw(wimg)
     for i, row in enumerate(L["refl"]):
         wimg.paste(row, (round(math.sin(t * P["ripple"] + i * 0.9) * (0.4 + i / 14)), i))
@@ -588,7 +712,7 @@ def draw(w, now, t):
         for i in range(amount // 5):
             if rand(72, i, frame) < 0.5:
                 wd.point((int(rand(73, i, frame) * 300), int(rand(74, i, frame) * wh)), fill=(210, 226, 244))
-    img.paste(wimg, (0, WATER_TOP), L["mask"])
+    img.paste(wimg, (0, L["water_top"]), L["mask"])
 
     img.paste(L["fore"], (0, 0), L["fore"])
     p = ImageDraw.Draw(img)   # opaque drawing for the particles: Pillow's alpha blending is slow on the Pi Zero
@@ -608,7 +732,7 @@ def draw(w, now, t):
     if precip == "storm" and frame % STRIKE in (0, 1, 3):   # lightning four times a loop, whole ones, so it repeats exactly: a flash, and a bolt onto One Liberty
         img = Image.blend(img, Image.new("RGB", ART, (230, 232, 255)), 0.35 if frame % STRIKE == 0 else 0.12)
         d = ImageDraw.Draw(img, "RGBA")
-        sx, sy = 168, 22   # One Liberty's spire
+        sx, sy = L["strike"]   # One Liberty's spire, or the landscape's tallest point
         x, y, pts = sx + int(rand(80, frame // STRIKE) * 30) - 15, 0, []
         while y < sy - 4:
             pts.append((x, y)); y += 2 + int(rand(81, y, frame // STRIKE) * 3); x += int(rand(82, y, frame // STRIKE) * 7) - 3
