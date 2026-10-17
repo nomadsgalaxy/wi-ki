@@ -58,7 +58,8 @@ def log(msg):
 
 def assemble(repo, dest):
     """the kiosk/ folder a kiosk runs, at dest: the repo's kiosk/, with the catalog's pages and transitions put back
-    where they run (pages/<name>/ and transitions/<name>.py), so a kiosk's paths are the same as they've always been"""
+    where they run (pages/<name>/ and transitions/<name>.py), so a kiosk's paths are the same as they've always been,
+    and the catalog's entries in entries/ for the setup page"""
     skip = shutil.ignore_patterns("__pycache__")
     shutil.copytree(f"{repo}/kiosk", dest, ignore=skip)
     for name in os.listdir(f"{repo}/catalog/pages"):
@@ -66,6 +67,7 @@ def assemble(repo, dest):
     for name in os.listdir(f"{repo}/catalog/transitions"):
         if name.endswith(".py"):
             shutil.copy2(f"{repo}/catalog/transitions/{name}", f"{dest}/transitions/{name}")
+    shutil.copytree(f"{repo}/catalog/entries", f"{dest}/entries")   # what each one is, for the setup page
 
 
 def update():

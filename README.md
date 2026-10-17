@@ -50,6 +50,10 @@ Each kiosk keeps its own settings in `~/.config/kiosk/`. The updates never touch
 | `transitions-off.json` | transitions to skip, like `["matrix"]` (`deploy/kiosk-config` writes it) | all of them on |
 | `remote.json` | its render server: `{"server": "<address>", "port": 7676}` | it draws its own pages |
 | `eventsync.json` | where the calendar's events come from | no events |
+| `config.json` | the card's ID, and whether its setup page is on (`"setup": true`) | no setup page |
+| `admin-login.json` | the setup page's login, as a hash (the setup page writes it) | the first-boot login on the screen |
+
+The setup page changes `playlist.json` and `transitions-off.json` for you, on a kiosk that draws its own pages.
 
 ## Setting up a new kiosk
 
@@ -63,6 +67,18 @@ Each kiosk keeps its own settings in `~/.config/kiosk/`. The updates never touch
 **For a kiosk on a network you can't reach** (so you can't run steps 4 and 5 over SSH), run step 2 as `KIOSK_HOSTNAME=<name> KIOSK_UNATTENDED=1 setup/firstboot.sh <boot partition>`. The card then sets itself up on first boot (about 15 minutes on a Zero): it installs what it needs, clones the repo, puts the code in place, runs `pi-setup.sh` and reboots into the kiosk. After that it updates itself like any other kiosk.
 
 Then give it its own settings in `~/.config/kiosk/`, if it needs any.
+
+## The setup page
+
+A kiosk can host its own setup page, so you can change its pages, transitions and location from a browser on the same network, without SSH. It's off until the kiosk's `~/.config/kiosk/config.json` says `"setup": true`. To have it on from the first boot, make the card with `KIOSK_SETUP=1 setup/firstboot.sh <boot partition>`.
+
+**The first login.** While the kiosk isn't set up, its screen shows its address, a user name like `Kiosk-Otter` and a three-word password. Both are new every time the setup page starts, and they're only kept in memory. Go to the address. Your browser will warn that it can't check the certificate, because the kiosk made it for itself. Only go past that warning if the SHA-256 fingerprint your browser shows for it matches the one on the kiosk's screen: ignore the colons and capitals, and compare all 64 characters. If it doesn't match, don't log in, because something else on the network answered. The first thing it asks is for your own user name and password, and the screen stops showing the old ones.
+
+**What it changes.** The status of the kiosk, its pages (on or off, how long each stays up, their order, and more from the catalog), its transitions and its location. A change restarts the display, so you'll see it in a few seconds. A kiosk whose pages come from a render server has those settings on the server, so its setup page shows them but doesn't change them.
+
+**Forgot the login?** Over SSH, delete `~/.config/kiosk/admin-login.json` and run `sudo systemctl restart kiosk-admin`. The screen shows a new first-boot login.
+
+It only serves HTTPS, on the kiosk's own addresses and only to local networks. Logins slow down after 5 wrong tries, and every change has to come from the page itself. `kiosk/admin.py` has the details, and `kiosk/setup_check.py` tests them. Setting a kiosk up by name (`https://k-<id>.kiosk.local`) is built in but stays off until the kiosks have their own certificate authority.
 
 ## The render server
 
@@ -101,7 +117,7 @@ Times are local (America/New_York). Use a plain date as `start` for all-day even
 
 ## Credits
 
-The skyline is traced from [The Philadelphia skyline (cropped)](https://commons.wikimedia.org/wiki/File:The_Philadelphia_skyline_(cropped).jpg) by Mefman00, licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and the pixel art is shared under the same licence. The text uses the VGA console font from Debian's `console-setup`; its notice is in [`kiosk/fonts/LICENSE`](kiosk/fonts/LICENSE). Forecasts come from [Open-Meteo](https://open-meteo.com), flights from [adsb.lol](https://adsb.lol) and routes from [adsbdb.com](https://www.adsbdb.com). The radar's street map is © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Every other page's and transition's credits are in its catalog entry.
+The setup page's first-boot passwords use the [EFF short word list](https://www.eff.org/dice) (`kiosk/words.txt`), by the Electronic Frontier Foundation, licensed [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/). The skyline is traced from [The Philadelphia skyline (cropped)](https://commons.wikimedia.org/wiki/File:The_Philadelphia_skyline_(cropped).jpg) by Mefman00, licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and the pixel art is shared under the same licence. The text uses the VGA console font from Debian's `console-setup`; its notice is in [`kiosk/fonts/LICENSE`](kiosk/fonts/LICENSE). Forecasts come from [Open-Meteo](https://open-meteo.com), flights from [adsb.lol](https://adsb.lol) and routes from [adsbdb.com](https://www.adsbdb.com). The radar's street map is © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Every other page's and transition's credits are in its catalog entry.
 
 ## Licence
 
