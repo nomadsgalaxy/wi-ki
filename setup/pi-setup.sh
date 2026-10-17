@@ -90,7 +90,7 @@ runuser -u kiosk -- bash -c '[ -d ~/HiveKiosk/.git ] || git clone -q https://git
 if [ -d /home/kiosk/kiosk/systemd ]; then
   install -m644 /home/kiosk/kiosk/systemd/* /etc/systemd/system/
   systemctl daemon-reload
-  for t in /home/kiosk/kiosk/systemd/*.timer; do systemctl enable --now "$(basename "$t")"; done
+  for t in /home/kiosk/kiosk/systemd/*.timer /home/kiosk/kiosk/systemd/*.path; do systemctl enable --now "$(basename "$t")"; done
   for s in /home/kiosk/kiosk/systemd/*.service; do   # and the services that run all the time (the Wi-Fi rescue)
     grep -q '^\[Install\]' "$s" && systemctl enable --now "$(basename "$s")"
   done

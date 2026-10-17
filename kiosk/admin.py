@@ -41,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves our own folder off the path
 
-import config, link  # noqa: E402
+import config, link, packs  # noqa: E402
 
 CONF = os.path.dirname(config.PATH)
 TLS = os.path.join(CONF, "tls")
@@ -565,7 +565,9 @@ class Setup(BaseHTTPRequestHandler):
             return self.reply(page(st.cfg["id"], SETTINGS[path](s["csrf"])), code=409)
         with st.saving:
             try:
-                if path == "/transitions":
+                if path == "/install":
+                    send_pack(pack_form(fields))
+                elif path == "/transitions":
                     save(off=change_transitions(fields, themes()))
                 elif path == "/pages":
                     save(playlist=change_pages(current()["playlist"], fields, catalog(), server()))
@@ -844,7 +846,7 @@ def change_transitions(form, names):
 
 
 
-NAV = """<nav><a href=/>Status</a> · <a href=/pages>Pages</a> · <a href=/transitions>Transitions</a> · <a href=/location>Location</a>
+NAV = """<nav><a href=/>Status</a> · <a href=/pages>Pages</a> · <a href=/transitions>Transitions</a> · <a href=/install>Install</a> · <a href=/location>Location</a>
 · <a href=/change>Login</a></nav>"""
 
 
@@ -962,7 +964,104 @@ def location_page(csrf, note=""):
             f"{field('place', 'Place, for the weather heading')}{save}</form>")
 
 
-SETTINGS = {"/pages": pages_page, "/transitions": transitions_page, "/location": location_page}
+PACKS_REQUEST, PACKS_STATUS = os.path.join(CONF, packs.REQUEST), os.path.join(CONF, packs.STATUS)
+PRESENT = link.present   # what's installed here; the self-test swaps it
+
+
+def pack_state():
+    """what's installed where the pages run -> {"present": {"pages", "transitions"}, "packs": {...}, "status": {...}}"""
+    to = linked() if server() else None
+    if to:
+        got = link.request(*to, {"op": "get"})
+        return {k: got.get(k) or {} for k in ("present", "packs", "status")}
+    read = lambda path: packs.read_json(path, {})
+    return {"present": PRESENT(HERE), "packs": read(os.path.join(CONF, "packs.json")), "status": read(PACKS_STATUS)}
+
+
+def pack_form(fields):
+    """the Install page's form -> a request for packs.py, checked here and again by packs.py, or ValueError"""
+    action, kind, name = fields.get("action"), fields.get("kind"), fields.get("name", "")
+    named = lambda: kind in packs.KINDS and packs.NAME.fullmatch(name)
+    if action == "catalog" and named():
+        req = {"op": "install", "source": "catalog", "kind": kind, "name": name}
+    elif action == "remove" and named():
+        req = {"op": "remove", "kind": kind, "name": name}
+    elif action == "update" and packs.NAME.fullmatch(name):
+        req = {"op": "update", "name": name}
+    elif action == "check":
+        req = {"op": "check"}
+    elif action == "repo":
+        if fields.get("agree") != "on":
+            raise ValueError("Tick the box first: it's code nobody has reviewed, and it runs on the kiosk.")
+        owner, repo = packs.github(fields.get("repo", ""))
+        ref = fields.get("ref", "").strip()
+        if ref and (not re.fullmatch(r"[A-Za-z0-9._/-]{1,100}", ref) or ".." in ref):
+            raise ValueError("That isn't a branch, tag or commit.")
+        req = {"op": "install", "source": "repo", "repo": f"https://github.com/{owner}/{repo}", **({"ref": ref} if ref else {})}
+    else:
+        raise ValueError("That isn't something this page does.")
+    return {"id": secrets.token_hex(8), **req}
+
+
+def send_pack(req):
+    """to where it's carried out: this kiosk's packs.py, and on a render server's kiosk the server's too (pages run
+    there, and transitions on both)"""
+    to = linked() if server() else None
+    if to:
+        link.request(*to, {"op": "packs", "request": req})
+    write_private(PACKS_REQUEST, req)
+
+
+def install_page(csrf, note=""):
+    try:
+        state = pack_state()
+    except (OSError, ValueError) as e:
+        return unreachable("Install", e)
+    drawn_by, ro, known = server(), locked(), catalog()
+    have = {k: set(state["present"].get(k, [])) for k in ("pages", "transitions")}
+    playing, core_names = {e["page"] for e in current()["playlist"]} if not ro else set(), packs.core(HERE)
+    status, mine = state["status"], state["packs"]
+    form = lambda action, label, **hidden: "" if ro else (
+        f'<form method=post action=/install class=inline><input type=hidden name=csrf value="{csrf}">'
+        f'<input type=hidden name=action value={action}>' +
+        "".join(f'<input type=hidden name={k} value="{html.escape(str(v))}">' for k, v in hidden.items()) +
+        f"<button>{label}</button></form>")
+    banner = ""
+    if os.path.exists(PACKS_REQUEST) or status.get("state") == "working":
+        banner = '<meta http-equiv=refresh content=5><p class=note>Working on it. This page checks again every few seconds.</p>'
+    elif status.get("message"):
+        banner = f"<p class=note>Last time: {html.escape(status['message'])}</p>"
+    sections = []
+    for kind, folder, title in (("page", "pages", "Pages"), ("transition", "transitions", "Transitions")):
+        rows = []
+        for name, entry in sorted(known.items()):
+            if entry.get("kind") != kind:
+                continue
+            about = html.escape(entry.get("about", ""))[:160]
+            if name in have[folder]:
+                why = ("comes with every kiosk" if name in core_names[folder] else "in the playlist" if name in playing else "")
+                action = f"<small>Installed{', ' + why if why else ''}.</small>" + ("" if why else " " + form("remove", "Remove", kind=kind, name=name))
+            else:
+                action = form("catalog", "Install", kind=kind, name=name)
+            rows.append(f"<li><b>{html.escape(name)}</b> <small>{about}</small><br>{action}")
+        sections.append(f"<h2>{title} from the catalog</h2><ul>{''.join(rows)}</ul>")
+    updates = status.get("updates") or {}
+    repo_rows = "".join(
+        f"<li><b>{html.escape(n)}</b> <small>a {html.escape(p.get('kind', '?'))} from {html.escape(p.get('repo', '?'))} at "
+        f"{html.escape(p.get('commit', '')[:7])}</small><br>"
+        + (form("update", f"Update to {html.escape(updates[n][:7])}", name=n) if n in updates else "")
+        + form("remove", "Remove", kind=p.get("kind", "page"), name=n) for n, p in sorted(mine.items()))
+    repo_form = "" if ro else f"""<form method=post action=/install><input type=hidden name=csrf value="{csrf}">
+<input type=hidden name=action value=repo><label>GitHub repo<input name=repo placeholder="https://github.com/someone/their-page"></label>
+<label>Branch, tag or commit (optional)<input name=ref placeholder="the default branch"></label>
+<label class=check><input type=checkbox name=agree value=on> I understand nobody has reviewed this code, and it runs on the kiosk
+with the kiosk's access: only install from someone you trust.</label><button>Install from the repo</button></form>"""
+    return (f"{NAV}<h2>Install</h2>{elsewhere(drawn_by) if drawn_by else ''}{banner}<p class=note>{html.escape(note)}</p>"
+            f"<p>Everything in the catalog has been reviewed. Installing restarts the display.</p>{''.join(sections)}"
+            f"<h2>From a repo</h2><ul>{repo_rows or '<li>Nothing yet.'}</ul>{form('check', 'Check for updates') if mine else ''}{repo_form}")
+
+
+SETTINGS = {"/pages": pages_page, "/transitions": transitions_page, "/location": location_page, "/install": install_page}
 
 
 def servers(cfg, addrs, ctx, https=HTTPS, http=HTTP, limit=CLIENTS, per_address=PER_ADDRESS, deadline=DEADLINE,
@@ -1115,8 +1214,8 @@ def settings_check():
 
 def check():
     import contextlib, http.client, io, tempfile
-    global SCRYPT, SETUP, PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart
-    saved, settings_saved = (SCRYPT, SETUP), (PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart)
+    global SCRYPT, SETUP, PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart, PACKS_REQUEST, PACKS_STATUS, PRESENT
+    saved, settings_saved = (SCRYPT, SETUP), (PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart, PACKS_REQUEST, PACKS_STATUS, PRESENT)
     SCRYPT = {"n": 2 ** 10, "r": 8, "p": 1}   # quick for the test; the real ones are measured on a Zero
     settings_check()
     with tempfile.TemporaryDirectory() as d:
@@ -1137,6 +1236,8 @@ def check():
         json.dump([{"page": "weather"}], open(REPO_PLAYLIST, "w"))
         restarts = []
         restart = lambda: restarts.append(1)
+        PACKS_REQUEST, PACKS_STATUS = f"{d}/conf/packs-request.json", f"{d}/conf/packs-status.json"
+        PRESENT = lambda here: {"pages": ["weather"], "transitions": ["rain"]}
 
         def make(name, cn):
             subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
@@ -1307,6 +1408,26 @@ def check():
         assert post("/location", {"lat": "91", "lon": "0"})[0] == 400
         assert post("/transitions", {"t_rain": "on"})[0] == 303 and json.load(open(OFF)) == ["snow"]
         assert post("/transitions", {})[0] == 400, "not every transition off"
+        # the Install page: a request for packs.py, checked here first
+        status, _, body, _, _ = ask("GET", "/install", name, cookies={"__Host-kiosk": session})
+        assert status == 200 and "Install from the repo" in body and "comes with every kiosk" in body, status
+        assert post("/install", {"action": "catalog", "kind": "page", "name": "sky"})[:2] == (303, "/install")
+        assert json.load(open(PACKS_REQUEST)) | {"id": "x"} == {"id": "x", "op": "install", "source": "catalog", "kind": "page", "name": "sky"}
+        assert "Working on it" in ask("GET", "/install", name, cookies={"__Host-kiosk": session})[2], "while it's carried out"
+        os.remove(PACKS_REQUEST)
+        json.dump({"state": "done", "message": "Installed sky from the catalog."}, open(PACKS_STATUS, "w"))
+        assert "Last time: Installed sky" in ask("GET", "/install", name, cookies={"__Host-kiosk": session})[2]
+        status, _, body, _, _ = post("/install", {"action": "repo", "repo": "https://github.com/me/clock"})
+        assert status == 400 and "Tick the box" in body and not os.path.exists(PACKS_REQUEST), "not without the warning ticked"
+        for bad in ({"action": "repo", "agree": "on", "repo": "http://github.com/me/clock"},
+                    {"action": "repo", "agree": "on", "repo": "https://github.com/me/clock", "ref": "../main"},
+                    {"action": "remove", "kind": "page", "name": "../x"}, {"action": "catalog", "kind": "app", "name": "sky"},
+                    {"action": "format"}):
+            assert post("/install", bad)[0] == 400 and not os.path.exists(PACKS_REQUEST), bad
+        assert post("/install", {"action": "repo", "agree": "on", "repo": "https://github.com/me/clock/", "ref": "main"})[0] == 303
+        assert json.load(open(PACKS_REQUEST)) | {"id": "x"} == {"id": "x", "op": "install", "source": "repo",
+                                                              "repo": "https://github.com/me/clock", "ref": "main"}
+        os.remove(PACKS_REQUEST)
         json.dump({"server": "10.0.0.9", "port": 7676}, open(REMOTE, "w"))
         before = open(PLAYLIST).read()
         status, _, body, _, _ = post("/pages", {"action": "on", "i": "0"})
@@ -1337,6 +1458,10 @@ def check():
         assert open(PLAYLIST).read() == here_before and len(restarts) == local_restarts, "and not on the Pi"
         assert post("/transitions", {"t_snow": "on"})[0] == 303 and json.load(open(f"{served}/conf/transitions-off.json")) == ["rain"]
         assert post("/pages", {"action": "add", "page": "nope"})[0] == 400
+        assert post("/install", {"action": "catalog", "kind": "transition", "name": "rain"})[0] == 303
+        assert json.load(open(f"{served}/conf/packs-request.json"))["name"] == "rain", "the server installs it, where pages run"
+        assert json.load(open(PACKS_REQUEST))["name"] == "rain", "and the Pi too, which plays transitions"
+        os.remove(PACKS_REQUEST)
         listener.close()
         status, _, body, _, _ = post("/pages", {"action": "on", "i": "0"})
         assert status == 502 and "Couldn't reach" in body, "a server that's away says so"
@@ -1493,7 +1618,7 @@ def check():
             sock.close()
         per.shutdown(); per.server_close()
     SCRYPT, SETUP = saved
-    PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart = settings_saved
+    PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart, PACKS_REQUEST, PACKS_STATUS, PRESENT = settings_saved
     print("admin: ok")
 
 
