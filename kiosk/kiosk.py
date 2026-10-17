@@ -350,7 +350,7 @@ def check():
         print(f"{name}: ok")
     importlib.import_module("eventsync").check()
     importlib.import_module("control").check()
-    for name in ("config", "admin", "setup_check"):   # the setup page and the rules it has to keep
+    for name in ("config", "link", "admin", "setup_check"):   # the setup page and the rules it has to keep
         importlib.import_module(name).check()
     gone = os.path.join(HERE, "no-setup.json")   # the Setup page as main() and run() reach it, through the package
     assert setup_page.urgent(gone) is False and setup_page.read(gone) == (None, 0)

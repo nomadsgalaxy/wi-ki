@@ -1,7 +1,8 @@
 """config: the setup page's settings for this kiosk, in ~/.config/kiosk/config.json. Updates never touch it.
 
   {"id": "k-7f3a2c",          the card's ID, picked when the card is made
-   "setup": false,            the setup page only starts when this is true
+   "setup": true,             whether the setup page runs; without it, it runs on any kiosk with a screen (one
+                              that can show its first-boot login), and not on a render server
    "setup_by_ip": true}       its setup page can be reached by IP address, behind its login; false turns that off
                               (it can always be reached by IP before its first login is replaced)
 
@@ -17,7 +18,8 @@ checks a playlist with validate_playlist() before it writes one.
 import json, os, re, secrets, sys
 
 PATH = os.path.expanduser("~/.config/kiosk/config.json")
-DEFAULTS = {"id": None, "setup": False, "setup_by_ip": True}
+DEFAULTS = {"id": None, "setup": None, "setup_by_ip": True}
+SCREEN = "/dev/fb0"   # a kiosk's own screen; a render server hasn't one
 ENTRY = {"page", "seconds", "options", "on", "name"}
 
 
@@ -31,9 +33,14 @@ def validate(cfg):
     if cfg.get("id") is not None and not (isinstance(cfg["id"], str) and re.fullmatch(r"k-[0-9a-f]{6}", cfg["id"])):
         raise ValueError("id must look like k-7f3a2c")
     for flag in ("setup", "setup_by_ip"):
-        if not isinstance(cfg.get(flag, False), bool):
+        if flag in cfg and cfg[flag] is not None and not isinstance(cfg[flag], bool):
             raise ValueError(f"{flag} must be true or false")
     return cfg
+
+
+def setup_on(cfg, screen=SCREEN):
+    """whether the setup page runs: "setup" says so if it's there, and otherwise it's on wherever there's a screen"""
+    return cfg.get("setup") is True or (cfg.get("setup") is None and os.path.exists(screen))
 
 
 def validate_playlist(playlist):
@@ -95,6 +102,10 @@ def check():
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "kiosk", "config.json")
         assert load(path) == DEFAULTS, "no file: today's behaviour"
+        screen = os.path.join(d, "fb0"); open(screen, "w").close()
+        assert setup_on(DEFAULTS, screen) and not setup_on(DEFAULTS, os.path.join(d, "none")), "on where there's a screen"
+        assert not setup_on({"setup": False}, screen) and setup_on({"setup": True}, os.path.join(d, "none"))
+        assert not setup_on({"setup": "yes"}, screen), "only true or false say"
         cfg = {"id": "k-7f3a2c", "setup": True}
         save(cfg, path)
         assert load(path) == {**DEFAULTS, **cfg} and os.stat(path).st_mode & 0o777 == 0o600 and not os.path.exists(path + ".tmp")

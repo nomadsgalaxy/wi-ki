@@ -47,7 +47,7 @@ Every page and transition is in `catalog/`, with an entry in `catalog/entries/<n
 
 ## The setup page
 
-`kiosk/admin.py` is the kiosk's setup page, and it's security code: it faces whatever network the kiosk is on. Keep its rules when you change it: HTTPS only, its own addresses and local networks only, the form token and the same-origin check on every change, the login throttle, and nothing secret in its log. `kiosk/setup_check.py` tests those rules, and `kiosk.py --check` runs it. A new setting writes the same files `kiosk.py` reads (`playlist.json`, `transitions-off.json`), checked first (`config.validate_playlist()`), and is refused on a kiosk that shows a render server.
+`kiosk/admin.py` is the kiosk's setup page, and it's security code: it faces whatever network the kiosk is on. Keep its rules when you change it: HTTPS only, its own addresses and local networks only, the form token and the same-origin check on every change, the login throttle, and nothing secret in its log. `kiosk/setup_check.py` tests those rules, and `kiosk.py --check` runs it. A new setting writes the same files `kiosk.py` reads (`playlist.json`, `transitions-off.json`), checked first (`config.validate_playlist()`), and goes to the render server through `link.py` on a kiosk that shows one (signed with the shared key in `remote.json`, and refused without it).
 
 ## Per-kiosk settings
 
