@@ -352,6 +352,16 @@ def check():
     importlib.import_module("control").check()
     for name in ("config", "admin", "setup_check"):   # the setup page and the rules it has to keep
         importlib.import_module(name).check()
+    gone = os.path.join(HERE, "no-setup.json")   # the Setup page as main() and run() reach it, through the package
+    assert setup_page.urgent(gone) is False and setup_page.read(gone) == (None, 0)
+    assert setup_page.draw({"done": True}).size == kit.SCREEN
+
+    class Screen:   # always visible, and only memory: a few turns of the display loop itself, which nothing else runs
+        mm = bytearray(kit.SCREEN[0] * kit.SCREEN[1] * 2)
+        visible, flush, close = (lambda self: True), (lambda self: None), (lambda self: None)
+        def play(self, new): self.mm[:] = new
+    turns = iter(range(4))
+    main(Screen(), until=lambda: next(turns, None) is None)
     transitions.check()
     remote.check()
     web.check()
