@@ -1,0 +1,4 @@
+[
+  {"page": "weather"},
+  {"page": "radar", "seconds": 20}
+]

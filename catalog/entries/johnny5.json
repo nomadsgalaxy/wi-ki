@@ -1,0 +1,32 @@
+{
+ "name": "johnny5",
+ "kind": "transition",
+ "home": "public",
+ "about": "Johnny 5: a comic page, his head struck by lightning, ZZZAP!, NEED INPUT!, then arms up under NUMBER 5 IS ALIVE!",
+ "found": {
+  "main": "02bc9c"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [],
+  "secrets": []
+ },
+ "settings": {},
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "CC BY-SA 4.0. kiosk/art/johnny5.png (arms down), johnny5-arms-up.png and johnny5-head.png are Muse's pixel art; johnny5-strike.png is Nula's art after Muse's; all made after \"204 MNACTEC (Terrassa), exposició temporal Robots, Johnny 5, de Short Circuit (1986).jpg\" by Enric (Wikimedia Commons, CC BY-SA 4.0), and reduced here (cut out, 20 or 19 colours from the art itself, ink outlines). Johnny-5 is Short Circuit's (1986) design: an unofficial fan tribute, for our own kiosks",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}
