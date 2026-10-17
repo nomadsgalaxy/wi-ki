@@ -5,8 +5,9 @@
 Each run:
 1. fetches main into the Pi's clone (~/HiveKiosk, pulled over https: the repo is public) and stops if nothing changed
    since the last commit it applied;
-2. runs the smoke test on the new code (every page loads and draws; the full check is too slow for a Zero, so that
-   runs before pushing), and stops if it fails (and won't try that commit again);
+2. puts the new code together beside the running one and runs the smoke test on it (every page loads and draws; the
+   full check is too slow for a Zero, so that runs before pushing), and stops if it fails (and won't try that commit
+   again);
 3. swaps the new kiosk/ (with the catalog's pages and transitions, see assemble()) in for ~/kiosk in one move,
    installs any systemd units that changed, and restarts the display.
 
@@ -77,20 +78,23 @@ def update():
     kiosk("git", "reset", "--quiet", "--hard", new)
     subject = kiosk("git", "log", "-1", "--format=%s", new)
     log(f"testing {new[:7]}: {subject}")
-    started = time.time()
-    try:
-        kiosk("nice", "python3", "-I", f"{CLONE}/kiosk/kiosk.py", "--smoke", timeout=900)
-    except subprocess.CalledProcessError as e:
-        write(REFUSED, new)
-        return log(f"{new[:7]} failed its tests, not applying it:\n{(e.stderr or e.stdout)[-1500:]}")
-    except subprocess.TimeoutExpired:   # a busy Zero, not a bad commit: try it again next time rather than refuse it
-        return log(f"{new[:7]}'s tests took over 15 minutes, not applying it yet; trying again next time")
-    log(f"smoke test passed in {time.time() - started:.0f} s")
-
-    # the new code goes in beside the running one, then swaps in in one move
+    # the new code goes in beside the running one, and the smoke test runs on exactly that, so a folder put together
+    # wrong fails here instead of on the screen
     shutil.rmtree(f"{LIVE}.new", ignore_errors=True); shutil.rmtree(f"{LIVE}.old", ignore_errors=True)
     assemble(CLONE, f"{LIVE}.new")
     subprocess.run(["chown", "-R", "kiosk:kiosk", f"{LIVE}.new"], check=True)
+    started = time.time()
+    try:
+        kiosk("nice", "python3", "-I", f"{LIVE}.new/kiosk.py", "--smoke", timeout=900)
+    except subprocess.CalledProcessError as e:
+        write(REFUSED, new); shutil.rmtree(f"{LIVE}.new", ignore_errors=True)
+        return log(f"{new[:7]} failed its tests, not applying it:\n{(e.stderr or e.stdout)[-1500:]}")
+    except subprocess.TimeoutExpired:   # a busy Zero, not a bad commit: try it again next time rather than refuse it
+        shutil.rmtree(f"{LIVE}.new", ignore_errors=True)
+        return log(f"{new[:7]}'s tests took over 15 minutes, not applying it yet; trying again next time")
+    log(f"smoke test passed in {time.time() - started:.0f} s")
+
+    # then it swaps in in one move
     if os.path.isdir(LIVE):
         os.rename(LIVE, f"{LIVE}.old")
     os.rename(f"{LIVE}.new", LIVE)
@@ -111,7 +115,8 @@ def update():
             if name in changed and name.endswith(".service"):
                 subprocess.run(["systemctl", "restart", name], capture_output=True)
 
-    subprocess.run(["pkill", "-f", f"^python3 -I {LIVE}/kiosk.py"])   # its login loop brings it back in 3 s
+    # the Pi's login loop brings it back in 3 s, and on a render server systemd does, which runs it as /usr/bin/python3
+    subprocess.run(["pkill", "-f", f"(^|/)python3 -I {LIVE}/kiosk.py"])
     write(APPLIED, new)
     log(f"applied {new[:7]}: {subject}")
 
