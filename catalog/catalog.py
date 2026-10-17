@@ -134,8 +134,8 @@ def facts(repo, ref, kind, name):
     if kind == "page":
         page = files.get(f"catalog/pages/{name}/page.py", "")
         return obj, hosts, options(page) if page else {}, "def check(" in text, text, shapes(page) if page else {"bar"}
-    themes = git(repo, "show", f"{ref}:kiosk/transitions/__init__.py") or ""   # its check() plays every theme
-    return obj, hosts, {}, f'"{name}": ' in themes and "def frames(" in text, text, {"bar"}   # canvas.py draws the bar
+    # the player's check() plays every theme it finds, so a transition with frames() is checked
+    return obj, hosts, {}, "def frames(" in text, text, {"bar"}   # canvas.py draws the bar
 
 
 def problems(entry, lines):
