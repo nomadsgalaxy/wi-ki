@@ -19,7 +19,7 @@ Installing a pack asks for anything it needs a fresh API token or a server for, 
 | github | page | public | open PRs, issues and recent pushes for our three orgs | one, on main `1209b6` | asks: feed, render server | unchecked |
 | halflife3 | page | public | is Half-Life 3 out yet? | one, on main `ed36be` | store.steampowered.com | unchecked |
 | nowplaying | page | public | whatever my desktop is playing, with lyrics and a live spectrum | one, on main `4fe4c4` | asks: folder, render server | unchecked |
-| radar | page | public | what's flying overhead, on a live map | one, on main `d925e6` | api.adsb.lol, api.adsbdb.com, mesonet.agron.iastate.edu, overpass-api.de, overpass.private.coffee | unchecked |
+| radar | page | public | what's flying overhead, on a live map | one, on main `8e2f4a` | api.adsb.lol, api.adsbdb.com, mesonet.agron.iastate.edu, opendata.adsb.fi, overpass-api.de, overpass.private.coffee | unchecked |
 | septa | page | public | is SEPTA fucked? Installing it asks whether to say "fcked" (sfw) | one, on main `a3f531` | isseptafucked.com, asks: sfw | unchecked |
 | sports | page | public | every Philly team's score, next game and record | one, on main `cded34` | site.api.espn.com, a.espncdn.com | unchecked |
 | system | page | public | my desktop's CPU, GPU, memory and network, live. The owner will pick what it shows, but the code doesn't do that yet | one, on main `e0da7d` | asks: file, render server | unchecked |
