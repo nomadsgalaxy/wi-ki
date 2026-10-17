@@ -13,18 +13,35 @@ canvas.py):
   johnny5        Johnny-5 rolls in, needs input, and scans the new page in with his eyes
 
 kiosk.py calls play() whenever the page changes. The themes take turns, in ORDER, leaving out any listed in
-~/.config/kiosk/transitions-off.json (deploy/kiosk-config sets it).
+~/.config/kiosk/transitions-off.json (deploy/kiosk-config sets it). A kiosk has the ones it's installed (packs.py):
+they're found here, in the catalog's folder in the repo, and in ~/.local/share/kiosk/transitions/ for ones from a repo.
+One that won't even load is left out, so it can't stop the display.
 """
-import itertools, json, os, sys, time
+import importlib, itertools, json, os, sys, time
 
-# the themes live in catalog/transitions/ in the repo; on a kiosk, autoupdate.py puts them here
-__path__.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "catalog", "transitions"))
-from . import coreone, hive76, nomadsgalaxy, matrix, hackerman, johnny5
+HERE = os.path.dirname(os.path.realpath(__file__))
+# the catalog's themes, in the repo (on a kiosk, autoupdate.py puts them here), then any installed from a repo
+__path__ += [os.path.join(HERE, "..", "..", "catalog", "transitions"), os.path.expanduser("~/.local/share/kiosk/transitions")]
 from .canvas import Canvas
 
 SECONDS, FPS = 3, 24   # slow enough to watch; 24 fps is what the busiest one manages on the Pi
-THEMES = {"coreone": coreone, "hive76": hive76, "nomadsgalaxy": nomadsgalaxy, "matrix": matrix, "hackerman": hackerman,
-          "johnny5": johnny5}
+FIRST = ("coreone", "hive76", "nomadsgalaxy", "matrix", "hackerman", "johnny5")   # the order they've always taken turns in
+
+
+def themes():
+    """every installed theme -> {name: module}, the usual ones first in their order, then the rest by name"""
+    names = {f[:-3] for d in __path__ if os.path.isdir(d) for f in os.listdir(d)
+             if f.endswith(".py") and f not in ("__init__.py", "canvas.py")}
+    found = {}
+    for name in sorted(names, key=lambda n: (FIRST.index(n) if n in FIRST else len(FIRST), n)):
+        try:
+            found[name] = importlib.import_module(f"{__name__}.{name}")
+        except Exception as e:   # a broken one is left out, and says why, rather than stopping the display
+            print(f"transitions: leaving out {name}: {type(e).__name__}: {e}", file=sys.stderr)
+    return found
+
+
+THEMES = themes()
 OFF = os.path.expanduser("~/.config/kiosk/transitions-off.json")
 
 
@@ -86,17 +103,19 @@ def check():
     # since a theme failing partway is caught and it lands on the new page anyway. A lone frame is the transition's
     # first (t=0), never the finished page: play() is what ends on the new page.
     # not johnny5: its last frame is always the new page, even when it's the only one
-    for name in ("hackerman", "hive76", "matrix", "nomadsgalaxy", "coreone"):
+    for name in [n for n in ("hackerman", "hive76", "matrix", "nomadsgalaxy", "coreone") if n in THEMES]:
         for count in (1, 2):
             c, shown = Canvas(bytearray(old), new), []
             for _ in THEMES[name].frames(c, count):
                 shown.append(bytes(c.mm))
             assert shown, f"{name} draws no frames of {count}"
             assert shown[0] != new, f"{name}'s first frame of {count} is not the new page"   # the first only: coreone's later ones may finish it
-    layers = -(-HEIGHT // coreone.LAYER)   # coreone plays count // layers steps a layer, and at least one (see its docstring)
-    for count, want in ((1, layers), (2, layers), (36, 2 * layers), (72, 5 * layers)):
-        got = sum(1 for _ in coreone.frames(Canvas(bytearray(old), new), count))
-        assert got == want, f"coreone draws {got} frames of {count}, not {want}"
+    if "coreone" in THEMES:
+        coreone = THEMES["coreone"]
+        layers = -(-HEIGHT // coreone.LAYER)   # coreone plays count // layers steps a layer, and at least one (its docstring)
+        for count, want in ((1, layers), (2, layers), (36, 2 * layers), (72, 5 * layers)):
+            got = sum(1 for _ in coreone.frames(Canvas(bytearray(old), new), count))
+            assert got == want, f"coreone draws {got} frames of {count}, not {want}"
     # a theme, on_frame or the pacing failing partway still ends on the new page, and doesn't raise
     import io, contextlib, tempfile
     def broken(c, count):
@@ -150,32 +169,35 @@ def check():
     with tempfile.TemporaryDirectory() as folder:
         path = os.path.join(folder, "off.json")
         assert turned_off(path) == set(), "no file: none off"
-        for body, want in (('["matrix", "coreone"]', {"matrix", "coreone"}), ('null', set()), ('7', set()), ('"matrix"', set()),
-                           ('[{"name": "matrix"}, "hive76"]', {"hive76"}), ('["nope", 3, null]', set()), ('{not json', set()),
-                           ('{"matrix": true}', set())):
+        a, b = list(THEMES)[:2]   # two that are installed: every kiosk has at least core's two
+        for body, want in ((f'["{a}", "{b}"]', {a, b}), ('null', set()), ('7', set()), (f'"{a}"', set()),
+                           (f'[{{"name": "{a}"}}, "{b}"]', {b}), ('["nope", 3, null]', set()), ('{not json', set()),
+                           (f'{{"{a}": true}}', set())):
             open(path, "w").write(body)
             assert turned_off(path) == want, (body, turned_off(path))
-    # nomadsgalaxy: the amber burst is 7 of 72 frames, the Drifter is never drawn over the page once it
-    # has opened, and the beams never reach the header (the clock)
-    n_burst = sum(0 < nomadsgalaxy.ease(k / 71, *nomadsgalaxy.BURST) < 1 for k in range(72))
-    assert n_burst == 7, f"the amber burst is {n_burst} frames, and the docs say 7"
-    real_draw, real_fill, over, high = Canvas.draw, Canvas.fill, [], []
-    def draw(self, spr, x, y, keep=False):
-        if spr in nomadsgalaxy.SHIPS:   # which rows of the screen hold the new page just now?
-            rows = [r for r in range(max(0, y), min(HEIGHT, y + spr["h"])) if self.cur[r * WIDTH * 2:(r + 1) * WIDTH * 2] == new[r * WIDTH * 2:(r + 1) * WIDTH * 2]]
-            over.append(len(rows))
-        return real_draw(self, spr, x, y, keep)
-    def fill(self, x, y, w, h, rgb, keep=False):
-        if 0 <= y < nomadsgalaxy.HEADER and (w == WIDTH and h in (4, 8) or h in (2, 3) and w >= 3 and self.cur[y * WIDTH * 2:(y + 1) * WIDTH * 2] == new[y * WIDTH * 2:(y + 1) * WIDTH * 2]):   # a beam, or a star over the opened header
-            high.append(y)
-        return real_fill(self, x, y, w, h, rgb, keep)
-    Canvas.draw, Canvas.fill = draw, fill
-    try:
-        play(bytearray(old), new, "nomadsgalaxy", fps=None)
-    finally:
-        Canvas.draw, Canvas.fill = real_draw, real_fill
-    assert over and not any(over), f"the Drifter is drawn over the new page on {sum(map(bool, over))} frames"
-    assert not high, f"a beam is drawn over the header at rows {high}"
+    if "nomadsgalaxy" in THEMES:
+        nomadsgalaxy = THEMES["nomadsgalaxy"]
+        # nomadsgalaxy: the amber burst is 7 of 72 frames, the Drifter is never drawn over the page once it
+        # has opened, and the beams never reach the header (the clock)
+        n_burst = sum(0 < nomadsgalaxy.ease(k / 71, *nomadsgalaxy.BURST) < 1 for k in range(72))
+        assert n_burst == 7, f"the amber burst is {n_burst} frames, and the docs say 7"
+        real_draw, real_fill, over, high = Canvas.draw, Canvas.fill, [], []
+        def draw(self, spr, x, y, keep=False):
+            if spr in nomadsgalaxy.SHIPS:   # which rows of the screen hold the new page just now?
+                rows = [r for r in range(max(0, y), min(HEIGHT, y + spr["h"])) if self.cur[r * WIDTH * 2:(r + 1) * WIDTH * 2] == new[r * WIDTH * 2:(r + 1) * WIDTH * 2]]
+                over.append(len(rows))
+            return real_draw(self, spr, x, y, keep)
+        def fill(self, x, y, w, h, rgb, keep=False):
+            if 0 <= y < nomadsgalaxy.HEADER and (w == WIDTH and h in (4, 8) or h in (2, 3) and w >= 3 and self.cur[y * WIDTH * 2:(y + 1) * WIDTH * 2] == new[y * WIDTH * 2:(y + 1) * WIDTH * 2]):   # a beam, or a star over the opened header
+                high.append(y)
+            return real_fill(self, x, y, w, h, rgb, keep)
+        Canvas.draw, Canvas.fill = draw, fill
+        try:
+            play(bytearray(old), new, "nomadsgalaxy", fps=None)
+        finally:
+            Canvas.draw, Canvas.fill = real_draw, real_fill
+        assert over and not any(over), f"the Drifter is drawn over the new page on {sum(map(bool, over))} frames"
+        assert not high, f"a beam is drawn over the header at rows {high}"
     print("transitions: ok")
 
 

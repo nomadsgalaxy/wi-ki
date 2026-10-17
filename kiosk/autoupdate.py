@@ -20,6 +20,9 @@ out) stays until main moves.
 """
 import fcntl, filecmp, os, shutil, subprocess, sys, time
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves our own folder off the path
+import packs  # noqa: E402
+
 HOME = "/home/kiosk"
 CLONE, LIVE = f"{HOME}/HiveKiosk", f"{HOME}/kiosk"
 STATE = f"{HOME}/.cache/kiosk"
@@ -56,16 +59,19 @@ def log(msg):
     print(f"autoupdate: {msg}", flush=True)
 
 
-def assemble(repo, dest):
+def assemble(repo, dest, only=None):
     """the kiosk/ folder a kiosk runs, at dest: the repo's kiosk/, with the catalog's pages and transitions put back
     where they run (pages/<name>/ and transitions/<name>.py), so a kiosk's paths are the same as they've always been,
-    and the catalog's entries in entries/ for the setup page"""
+    and the catalog's entries in entries/ for the setup page. only says which pages and transitions this kiosk has
+    ({"pages": names, "transitions": names}, from packs.wanted()); None puts in all of them, as deploy.sh does"""
     skip = shutil.ignore_patterns("__pycache__")
     shutil.copytree(f"{repo}/kiosk", dest, ignore=skip)
     for name in os.listdir(f"{repo}/catalog/pages"):
+        if only is not None and name not in only["pages"]:
+            continue
         shutil.copytree(f"{repo}/catalog/pages/{name}", f"{dest}/pages/{name}", ignore=skip)
     for name in os.listdir(f"{repo}/catalog/transitions"):
-        if name.endswith(".py"):
+        if name.endswith(".py") and (only is None or name[:-3] in only["transitions"]):
             shutil.copy2(f"{repo}/catalog/transitions/{name}", f"{dest}/transitions/{name}")
     shutil.copytree(f"{repo}/catalog/entries", f"{dest}/entries")   # what each one is, for the setup page
     if os.path.isdir(f"{repo}/catalog/landscapes"):   # people's own scenes for the weather page
@@ -86,7 +92,11 @@ def update():
     # the new code goes in beside the running one, and the smoke test runs on exactly that, so a folder put together
     # wrong fails here instead of on the screen
     shutil.rmtree(f"{LIVE}.new", ignore_errors=True); shutil.rmtree(f"{LIVE}.old", ignore_errors=True)
-    assemble(CLONE, f"{LIVE}.new")
+    # only what this kiosk has installed (core, its own, and what its playlist names); one from before packs keeps all
+    want = packs.wanted(CLONE, f"{HOME}/.config/kiosk", LIVE)
+    if os.path.exists(f"{HOME}/.config/kiosk/installed.json"):
+        subprocess.run(["chown", "kiosk:kiosk", f"{HOME}/.config/kiosk/installed.json"], check=True)
+    assemble(CLONE, f"{LIVE}.new", want)
     subprocess.run(["chown", "-R", "kiosk:kiosk", f"{LIVE}.new"], check=True)
     started = time.time()
     try:
@@ -114,8 +124,8 @@ def update():
     if changed:
         subprocess.run(["systemctl", "daemon-reload"], check=True)
         log(f"installed {', '.join(changed)}")
-    for name in os.listdir(f"{LIVE}/systemd"):   # every timer on, and every service that says it wants to run always
-        if name.endswith(".timer") or name.endswith(".service") and "[Install]" in open(f"{LIVE}/systemd/{name}").read():
+    for name in os.listdir(f"{LIVE}/systemd"):   # every timer and path on, and every service that says it wants to run
+        if name.endswith((".timer", ".path")) or name.endswith(".service") and "[Install]" in open(f"{LIVE}/systemd/{name}").read():
             subprocess.run(["systemctl", "enable", "--now", name], check=True, capture_output=True)
             if name in changed and name.endswith(".service"):
                 subprocess.run(["systemctl", "restart", name], capture_output=True)
