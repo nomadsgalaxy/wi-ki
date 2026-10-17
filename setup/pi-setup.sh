@@ -82,24 +82,9 @@ for extra in consoleblank=0 systemd.show_status=0; do
 done
 fi
 
-# updates from GitHub: a read-only deploy key for the kiosk user, and GitHub's host key, checked against the fingerprint
-# GitHub publishes (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
-runuser -u kiosk -- bash -s <<'K'
-set -e
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-[ -f ~/.ssh/hivekiosk_deploy ] || ssh-keygen -q -t ed25519 -N "" -C "hivekiosk-pi deploy key (read-only)" -f ~/.ssh/hivekiosk_deploy
-grep -q hivekiosk_deploy ~/.ssh/config 2>/dev/null || printf 'Host github.com\n  IdentityFile ~/.ssh/hivekiosk_deploy\n  IdentitiesOnly yes\n' >> ~/.ssh/config
-chmod 600 ~/.ssh/config
-if ! grep -q "^github.com ssh-ed25519" ~/.ssh/known_hosts 2>/dev/null; then
-  key=$(ssh-keyscan -t ed25519 github.com 2>/dev/null)
-  [ "$(echo "$key" | ssh-keygen -lf - | awk '{print $2}')" = "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU" ] \
-    || { echo "github.com's host key doesn't match GitHub's published one; not trusting it." >&2; exit 1; }
-  echo "$key" >> ~/.ssh/known_hosts
-fi
-[ -d ~/HiveKiosk/.git ] || git clone -q git@github.com:nomadsgalaxy/wi-ki.git ~/HiveKiosk 2>/dev/null || {
-  echo "Add this as a read-only deploy key on github.com/nomadsgalaxy/wi-ki (Settings > Deploy keys), then run this again:"
-  cat ~/.ssh/hivekiosk_deploy.pub; }
-K
+# updates from GitHub: the repo is public, so the kiosk user clones it over https and needs no key
+runuser -u kiosk -- bash -c '[ -d ~/HiveKiosk/.git ] || git clone -q https://github.com/nomadsgalaxy/wi-ki.git ~/HiveKiosk' \
+  || echo "Couldn't clone github.com/nomadsgalaxy/wi-ki; check the kiosk's network, then run this again."
 
 # the timers that come with the code (the event sync, auto-update), so deploy first
 if [ -d /home/kiosk/kiosk/systemd ]; then
