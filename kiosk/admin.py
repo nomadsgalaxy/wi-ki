@@ -933,10 +933,10 @@ def pages_page(csrf, note=""):
         seconds = (f'<form method=post action=/pages class=inline><input type=hidden name=csrf value="{csrf}">'
                    f'<input type=hidden name=action value=seconds><input type=hidden name=i value="{i}">'
                    f'<label>seconds <input name=seconds inputmode=numeric value="{html.escape(str(e.get("seconds", "")))}" '
-                   f'placeholder=own></label><button>set</button></form>')
+                   f'placeholder=own></label><button>save time</button></form>')
         controls = "" if ro else (button(csrf, "off" if on else "on", "turn off" if on else "turn on", i) +
-                                  button(csrf, "up", "↑ up", i) + button(csrf, "down", "↓ down", i) +
-                                  button(csrf, "remove", "remove", i, danger=True) + seconds)
+                                  button(csrf, "up", "↑ up", i) + button(csrf, "down", "↓ down", i) + seconds +
+                                  button(csrf, "remove", "remove", i, danger=True))   # last, apart from the rest
         rows.append(f"<li class='item {'on' if on else 'off'}'><span class=n>{i + 1:02}</span>"
                     f"<span class=name>{html.escape(e['page'])}</span><span class=tag>{'ON' if on else 'OFF'}</span>"
                     f"<small>{html.escape(about)}</small><div class=actions>{controls}</div>")
@@ -1037,6 +1037,29 @@ def send_pack(req):
     write_private(PACKS_REQUEST, req)
 
 
+def summary(about, most=140):
+    """a catalog entry's description, short: its first sentence, or as many whole words as fit, never cut mid-word"""
+    first = re.split(r"(?<=[.!?])\s", about.strip(), maxsplit=1)[0]
+    if len(first) <= most:
+        return first
+    return first[:most].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def needs_line(entry):
+    """what a page needs before it works, in words: a key, a feed, a render server, a touchscreen"""
+    needs = entry.get("needs", {}) if isinstance(entry.get("needs"), dict) else {}
+    out = []
+    if needs.get("secrets"):
+        out.append("an API key")
+    if any("feed" in str(a) for a in entry.get("ask", [])):
+        out.append("a feed from your desktop")
+    if needs.get("render") == "server":
+        out.append("a render server")
+    if needs.get("touch"):
+        out.append("a touchscreen")
+    return ", ".join(out)
+
+
 def install_page(csrf, note=""):
     try:
         state = pack_state()
@@ -1062,7 +1085,7 @@ def install_page(csrf, note=""):
         for name, entry in sorted(known.items()):
             if entry.get("kind") != kind:
                 continue
-            about = html.escape(entry.get("about", ""))[:160]
+            about, needs = html.escape(summary(entry.get("about", ""))), needs_line(entry)
             installed = name in have[folder]
             if installed:
                 why = ("comes with every kiosk" if name in core_names[folder] else "in the playlist" if name in playing else "")
@@ -1071,6 +1094,7 @@ def install_page(csrf, note=""):
                 action = form("catalog", "install", kind=kind, name=name)
             rows.append(f"<li class='item bare {'on' if installed else 'off'}'><span class=name>{html.escape(name)}</span>"
                         f"<span class=tag>{'INSTALLED' if installed else ''}</span><small>{about}</small>"
+                        + (f"<small class=note>needs {html.escape(needs)}</small>" if needs else "") +
                         f"<div class=actions>{action}</div>")
         sections.append(look.panel(f"{title} from the catalog", f"<ul>{''.join(rows)}</ul>"))
     updates = status.get("updates") or {}
@@ -1197,6 +1221,10 @@ def run():
 
 
 def settings_check():
+    assert summary("Shows the sky. Then more words.") == "Shows the sky." and summary("word " * 60).endswith("word…"), \
+        "a description is cut at a sentence, or between words"
+    assert needs_line({"needs": {"secrets": ["a token"], "render": "server"}, "ask": ["feed"]}) == \
+        "an API key, a feed from your desktop, a render server" and needs_line({}) == ""
     known = {"weather": {"kind": "page", "settings": {"lat": 0, "lon": 0, "place": ""}},
              "radar": {"kind": "page", "settings": {"lat": 0, "lon": 0}}, "clock": {"kind": "page"},
              "wide": {"kind": "page", "shapes": ["16-9"]}, "big": {"kind": "page", "needs": {"render": "server"}}}

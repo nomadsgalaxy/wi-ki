@@ -38,7 +38,7 @@ form.go button,button.go{{color:{BG};background:{CYAN};padding:.45em 2ch;margin-
 input,select{{font:inherit;color:{INK};background:{BG};border:1px solid {DUST};padding:.45em 1ch;width:100%;min-height:2.75em}}
 input:disabled{{color:{DUST};border-style:dashed}}
 label{{display:block;margin:.6em 0 0;color:{DUST}}}label>input,label>select{{margin-top:.2em}}
-.check{{display:flex;gap:1ch;align-items:baseline;color:{INK};margin:.4em 0}}.check input{{width:auto;min-height:0;flex:none;accent-color:{CYAN}}}
+.check{{display:flex;gap:1ch;align-items:baseline;color:{INK};margin:0;padding:.55em 0;min-height:2.75em;cursor:pointer}}.check input{{width:auto;min-height:0;flex:none;accent-color:{CYAN}}}
 table{{border-collapse:collapse;width:100%}}th{{text-align:left;font-weight:normal;padding:.3em 2ch .3em 0;vertical-align:top;white-space:nowrap}}
 td{{padding:.3em 0;overflow-wrap:anywhere}}
 ol,ul{{list-style:none;margin:0;padding:0}}li{{padding:.55em 0;border-bottom:1px dotted {LINE}}}li:last-child{{border:0}}
@@ -48,6 +48,7 @@ ol,ul{{list-style:none;margin:0;padding:0}}li{{padding:.55em 0;border-bottom:1px
 .item small,.item .actions{{grid-column:2/-1}}.item.bare{{grid-template-columns:1fr auto}}
 .item.bare small,.item.bare .actions{{grid-column:1/-1}}
 .actions{{display:flex;flex-wrap:wrap;align-items:center;gap:0 .5ch;margin-top:.15em}}
+.actions form:has(.danger){{margin-left:2ch}}
 form.inline{{display:inline-flex;align-items:center;gap:.5ch;margin:0}}form.inline label{{margin:0}}
 form.inline input{{width:7ch;min-height:2.4em;padding:.2em .6ch}}
 pre{{white-space:pre-wrap;overflow-wrap:anywhere;color:{DUST};margin:.5em 0}}
