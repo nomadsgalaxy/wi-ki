@@ -2,9 +2,9 @@
  "name": "cherdenko",
  "kind": "transition",
  "home": "public",
- "about": "Premier Cherdenko escapes to space: \"I'm escaping to the one place not corrupted by capitalism...\" SPACE!!!!, and the whole scene blasts off on a rocket flame",
+ "about": "Premier Cherdenko escapes to space, as a Soviet-era poster: \"I'm escaping to the one place not corrupted by capitalism...\", a withheld laugh, SPACE!!!!, and the whole poster blasts off on a rocket flame",
  "found": {
-  "main": "d5ddc6"
+  "main": "e1c72b"
  },
  "shapes": [
   "bar"
@@ -19,7 +19,7 @@
  "ask": [],
  "licence": {
   "code": "MIT",
-  "assets": "CC BY-SA 4.0. kiosk/art/cherdenko-talk.png (twelve frames of him speaking) is Nula's pixel art, reduced here (cut to one box, lined up on his shoulders, stray edge pixels taken off, 64 colours). Premier Cherdenko is Red Alert 3's (2008) character, played by Tim Curry: an unofficial fan tribute, for our own kiosks",
+  "assets": "CC BY-SA 4.0. kiosk/art/cherdenko-talk.png (twelve frames of him speaking) is Nula's pixel art, reduced here (cut to one box, lined up on his shoulders, stray edge pixels taken off, 64 colours). Premier Cherdenko is Red Alert 3's (2008) character, played by Tim Curry: an unofficial fan tribute, for our own kiosks. The lettering is Fira Sans Condensed ExtraBold, SIL Open Font License 1.1 (kiosk/fonts/FiraSans-OFL.txt), cut down to the characters it uses.",
   "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine"
  },
  "quality": {
