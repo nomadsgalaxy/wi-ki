@@ -198,6 +198,9 @@ def check():
             Canvas.draw, Canvas.fill = real_draw, real_fill
         assert over and not any(over), f"the Drifter is drawn over the new page on {sum(map(bool, over))} frames"
         assert not high, f"a beam is drawn over the header at rows {high}"
+    for name, module in THEMES.items():   # and a theme's own self-test, if it has one, so --check runs it too
+        if callable(getattr(module, "check", None)):
+            module.check()
     print("transitions: ok")
 
 
