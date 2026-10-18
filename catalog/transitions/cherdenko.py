@@ -16,8 +16,8 @@ import kit
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
 SECONDS = 6   # 144 frames: the night and the Premier in 0.8 s, his line to 3.7 s, SPACE!!!! and a shake, a 1.7 s launch
-LOOK_UP = .88  # how far through his talking he looks up (frame 8)
-RED, GOLD, INK, PAPER = (204, 26, 26), (255, 206, 40), (14, 12, 20), (248, 244, 232)
+LOOK_UP = .84  # how far through his talking he looks up (frame 8), then grins (9)
+RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 
 # --- the Premier ----------------------------------------------------------------------------------------------------
 # Nula's pixel art of Premier Cherdenko: a 4x3 sheet of him speaking, and him looking up, mouth open,
@@ -31,13 +31,14 @@ TALK = [TALK_ART.crop((i * FRAME_W, 0, (i + 1) * FRAME_W, TALK_ART.height)) for 
 K = 2                                        # drawn at twice the art's size
 FIG_W, FIG_H = SHOUT_ART.width * K, TALK_ART.height * K   # the box both poses fit, his shoulders on the screen's bottom
 FIG_X, FIG_Y = 250, HEIGHT - FIG_H
-SPEAKING = [0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in order, ending on 7, his eyes already
-                                             # drifting up, so 7 -> 8 (looking up) is the last step and never a jump back
+SPEAKING = [11, 0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in order: a smirk before he starts,
+                                                 # ending on 7, his eyes already drifting up, so 7 -> 8 is never a jump back
+LOOKING = [8, 9]                             # then he looks up, and grins at the sky, before he shouts
 
 # --- the night, the bubble and the shout ----------------------------------------------------------------------------
 BUBBLE = (840, 34, 1886, 238)                # his speech bubble, top right, its tail to his mouth
-TAIL = [(880, 226), (985, 226), (FIG_X + FIG_W + 20, 262)]   # a wedge off its bottom, its tip just right of him,
-                                                               # so his poses never cover it
+TAIL = [(870, 150), (870, 226), (FIG_X + FIG_W + 14, 268)]   # a wedge off its left side toward his mouth, its tip
+                                                               # just right of him, so his poses never cover it
 LINES = [((878, 84), "I'M ESCAPING TO THE ONE PLACE"), ((878, 144), "NOT CORRUPTED BY CAPITALISM...")]   # his line
 SHOUT, SHOUT_K = "SPACE!!!!", 10
 SHOUT_XY = (BUBBLE[0] + (BUBBLE[2] - BUBBLE[0] - len(SHOUT) * 8 * SHOUT_K) // 2, 282)
@@ -60,9 +61,11 @@ def night():
 def bubble(img, lines):
     """the speech bubble, with this many of its lines"""
     d = ImageDraw.Draw(img)
-    d.polygon(TAIL, fill=PAPER, outline=INK)
-    d.rectangle(BUBBLE, fill=PAPER, outline=INK, width=6)
-    d.line(TAIL[:2], fill=PAPER, width=5)   # the tail joins the bubble without a line across it
+    d.rectangle([v + 8 for v in BUBBLE], fill=INK)   # a drop shadow, then a red edge: ink alone is lost on the night
+    d.polygon(TAIL, fill=PAPER, outline=RED, width=6)
+    d.rectangle(BUBBLE, fill=PAPER, outline=RED, width=6)
+    d.line((BUBBLE[0] + 2, TAIL[0][1] + 6, BUBBLE[0] + 2, TAIL[1][1] - 6), fill=PAPER, width=8)   # the tail joins the
+                                                                                                   # bubble, no line across
     for xy, words in LINES[:lines]:
         kit.text(img, xy, words, INK, scale=3)
 
@@ -98,9 +101,9 @@ def region(make, box):
     return packed(img.crop(box), box[0], box[1])
 
 
-POSES = {i: packed(pose(TALK[i]), FIG_X, FIG_Y) for i in sorted(set(SPEAKING) | {8})}   # only the ones he uses
+POSES = {i: packed(pose(TALK[i]), FIG_X, FIG_Y) for i in sorted(set(SPEAKING + LOOKING))}   # only the ones he uses
 SHOUTING = packed(pose(SHOUT_ART), FIG_X, FIG_Y)
-SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 8, TAIL[2][1] + 8))
+SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
           for n in range(1, len(LINES) + 1)]
 SHOUT_BOX = (SHOUT_XY[0] - 4, SHOUT_XY[1] - 4, SHOUT_XY[0] + len(SHOUT) * 8 * SHOUT_K + 12, SHOUT_XY[1] + 16 * SHOUT_K + 12)
 SHOUTED = region(shout, SHOUT_BOX)
@@ -118,26 +121,24 @@ def big_sprite(img, k):
     return {"w": w, "h": img.height, "rows": rows}
 
 
-RISING = big_sprite(TALK[0], K)               # rising into view, he's drawn see-through over the night
+RISING = big_sprite(TALK[SPEAKING[0]], K)               # rising into view, he's drawn see-through over the night
 
 
 def flame(size, seed):
-    """a rocket flame, pointing down: white heart, gold, then red at the ragged tip"""
-    w, h = size
+    """a rocket flame, pointing down: ragged tongues of red, orange, gold, and a white-hot heart, drawn at a quarter
+    size and blown up, so it's chunky like the art"""
+    w, h = size[0] // 4, size[1] // 4
     img = Image.new("RGBA", (w, h)); d = ImageDraw.Draw(img); rnd = random.Random(seed)
-    for (k, colour) in ((1.0, RED + (255,)), (0.7, GOLD + (255,)), (0.38, PAPER + (255,))):
-        pts = []
-        for i in range(9):
-            t = i / 8
-            pts.append((w / 2 + (t - .5) * w * k, 0))
-        tip = h * k * (0.86 + rnd.random() * .14)
-        pts += [(w / 2 + w * k * .18, tip * .55), (w / 2 + w * k * .06, tip), (w / 2 - w * k * .08, tip * .8),
-                (w / 2 - w * k * .2, tip * .5)]
-        d.polygon(pts, fill=colour)
-    return big_sprite(img.resize((w // 4, h // 4), Image.NEAREST), 4)   # drawn at a quarter and blown up: chunky
+    for k, colour in ((1.0, RED), (.78, ORANGE), (.55, GOLD), (.3, PAPER)):
+        left, right = [], []
+        for j in range(13):
+            t = j / 12; half = w / 2 * k * (1 - t) ** .6 * (1 + rnd.uniform(-.18, .18))   # it narrows, raggedly
+            left.append((w / 2 - half, t * h * k)); right.append((w / 2 + half, t * h * k))
+        d.polygon(left + [(w / 2 + rnd.uniform(-2, 2), h * k)] + right[::-1], fill=colour + (255,))
+    return big_sprite(img, 4)
 
 
-FLAMES = [flame((360, 220), s) for s in (1, 2)]   # two, taking turns: it flickers
+FLAMES = [flame((360, 260), s) for s in (1, 2, 3)]   # three, taking turns: it flickers
 FLAME_X = FIG_X + FIG_W // 2 - 180
 
 
@@ -179,7 +180,7 @@ def frames(c, count):
     n = max(1, count)
     at = lambda f: round(f * n)
     drop, rise, talk, shout_at, shake_end, launch = at(.06), at(.13), at(.62), at(.66), at(.72), n
-    scene, shown, lifted = None, POSES[0], 0
+    scene, shown, lifted = None, POSES[SPEAKING[0]], 0
     for i in range(n):
         if i < drop:   # the night drops down over the old page, a band a frame
             c.reveal(0, 0, WIDTH, math.ceil(HEIGHT * (i + 1) / max(1, drop)), src=BACK)
@@ -189,14 +190,17 @@ def frames(c, count):
             k = (i - drop + 1) / max(1, rise - drop)
             c.draw(RISING, FIG_X + (FIG_W - RISING["w"]) // 2, FIG_Y + round(FIG_H * (1 - k) ** 2))
             if i == rise - 1:
-                put(c, POSES[0])
+                put(c, POSES[SPEAKING[0]])
         elif i < talk:   # he talks: each pose held about a quarter second at the usual length, spread so it always
                          # ends on the last one just before he looks up
             k = (i - rise) / max(1, talk - rise)
             for line, part in enumerate(SPEECH):   # the bubble's first line as he starts, the rest by 40% in
                 if i == rise + round(line * .4 * (talk - rise) / max(1, len(SPEECH) - 1)):
                     put(c, part)
-            frame = POSES[8] if k > LOOK_UP else POSES[SPEAKING[min(len(SPEAKING) - 1, int(k / LOOK_UP * len(SPEAKING)))]]
+            if k > LOOK_UP:   # he looks up, then grins at the sky
+                frame = POSES[LOOKING[min(len(LOOKING) - 1, int((k - LOOK_UP) / (1 - LOOK_UP) * len(LOOKING)))]]
+            else:
+                frame = POSES[SPEAKING[min(len(SPEAKING) - 1, int(k / LOOK_UP * len(SPEAKING)))]]
             if frame is not shown:   # each of Nula's frames is drawn whole, so all of him changes, once a hold. Nothing
                 put(c, frame, screen=True); shown = frame   # wipes or captures him before the shout replaces him,
                                                             # so the screen alone will do: ~460 copies, not ~920
@@ -206,19 +210,18 @@ def frames(c, count):
                 put(c, SHOUTING, (0, 0, FIG_W, FIG_H // 2))
             elif j == 1:
                 put(c, SHOUTING, (0, FIG_H // 2, FIG_W, FIG_H - FIG_H // 2))
-            else:
+            elif j == 2:
                 put(c, SHOUTED)
-                if i == shout_at - 1 and j < 2:   # too few frames for the halves: all of it at once
-                    put(c, SHOUTING)
         elif i < shake_end:   # the screen shakes as the engines light
             if scene is None:
-                put(c, SHOUTING); put(c, SHOUTED)   # whatever was skipped, it's all there before it goes
+                if shout_at - talk < 3:   # too few frames for the shout's three steps: all of it now, before it goes
+                    put(c, SHOUTING); put(c, SHOUTED)
                 scene = bytes(c.cur)
             dy = (6, -6, 4, -4, 2, -2, 0)[(i - shout_at) % 7]
             shake(c, scene, dy)
-            c.draw(FLAMES[i % 2], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - 60 + abs(dy))
+            c.draw(FLAMES[i % len(FLAMES)], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - 60 + abs(dy))
         else:   # lift-off: the scene goes up, faster and faster, on its flame, and the new page comes up from below
-            if scene is None:
+            if scene is None:   # no shake at this length either
                 put(c, SHOUTING); put(c, SHOUTED)
                 scene = bytes(c.cur)
             k = (i - shake_end + 1) / max(1, launch - shake_end)
@@ -229,7 +232,7 @@ def frames(c, count):
             if lift < HEIGHT:   # the scene, lifted, straight onto the screen: the next frame covers it again
                 c.mm[:(HEIGHT - lift) * STRIDE] = scene[lift * STRIDE:]
             lifted = lift
-            c.draw(FLAMES[i % 2], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - lift)   # it flickers and wobbles every frame
+            c.draw(FLAMES[i % len(FLAMES)], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - lift)   # it flickers and wobbles every frame
         yield
 
 
@@ -256,7 +259,7 @@ def check():
     try:
         for count in (144, 200, 96):
             order.clear(); list(frames(Canvas(bytearray(size), b"\x55" * size), count))
-            want = [POSES[0]] + [POSES[f] for f in SPEAKING[1:]] + [POSES[8]] if count >= 96 else None
+            want = [POSES[f] for f in SPEAKING + LOOKING] if count >= 96 else None
             assert order == want, (count, [next(k for k, v in POSES.items() if v is b) for b in order])
     finally:
         globals()["put"] = real
