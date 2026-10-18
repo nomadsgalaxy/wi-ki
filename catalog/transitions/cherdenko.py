@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 import kit
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-SECONDS = 6   # 144 frames: the panels and the Premier in 0.8 s, his line to 3.7 s, SPACE!!!! and a shake, a 1.7 s launch
+SECONDS = 6   # 144 frames: the panels and the Premier in 0.8 s, his line to 3.6 s, SPACE!!!! and its hold, a shake, a 1.4 s launch
 LOOK_UP = .84  # how far through his talking he looks up (frame 8), then grins (9)
 RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 CREAM, NAVY, TEAL = (238, 226, 198), (20, 24, 40), (40, 150, 140)   # the poster's paper, its dark fields, its cool accent
@@ -39,8 +39,8 @@ LOOKING = [8, 9]                             # then he looks up, and grins at th
 
 # --- the poster: two panels on cream paper, him in the first, his line and SPACE!!!! in the second --------------------
 # A Soviet-era propaganda poster's look, around Nula's art (which stays as it is): a few flat colours, no shading,
-# cream paper round dark fields, a spiky sunburst behind him, red stars and comet streaks, and heavy condensed capitals
-# on cream bands, the shout on a tilt. The lettering is Fira Sans Condensed ExtraBold (fonts/, SIL OFL 1.1, cut down
+# cream paper round dark fields, a spiky sunburst behind him and red stars, and heavy condensed capitals: his line on a
+# cream banner, and SPACE!!!! as the launch itself, cream on a red trail, rising, with launch rays behind. The lettering is Fira Sans Condensed ExtraBold (fonts/, SIL OFL 1.1, cut down
 # to the characters a line needs), drawn at half size without smoothing and doubled, so its edges are pixels like the
 # art's. His panel runs off the screen's foot, so he can rise into it from below.
 P1, P2 = (12, 12, 712, HEIGHT + 8), (724, 12, 1908, HEIGHT - 12)
@@ -52,7 +52,7 @@ LINES = [("I'M ESCAPING TO THE ONE PLACE", 32), ("NOT CORRUPTED", 52), ("BY CAPI
 SHOUT, SHOUT_CAP = "SPACE", 116                # the shout's word, and how tall its capitals are; then four !s
 FONT = os.path.join(kit.HERE, "fonts", "FiraSansCondensed-ExtraBold-subset.ttf")
 DROPS = [(0, (P1[2] + P2[0]) // 2), ((P1[2] + P2[0]) // 2, WIDTH)]   # each panel with the paper round it, to drop in
-STYLE = "launch"   # how SPACE!!!! is set: "launch" (cream letters on a red trail, launch rays behind) or "paper"
+SLIDE = [(-42, 28), (-20, 13), (-7, 5), (0, 0)]   # where the word's face is, frame by frame, as it slides onto its trail
 
 
 def star(d, cx, cy, r, fill):
@@ -96,13 +96,7 @@ def page():
     img.paste(rays, P1[:2])
     for x, y, r in ((60, 70, 22), (650, 60, 16), (90, 330, 14), (640, 300, 20)):
         star(d, P1[0] + x, P1[1] + y, r, RED)
-    if STYLE == "paper":   # the other panel's comet streaks and stars; the launch keeps that field clear for the word
-        for x, y in ((820, 470), (1010, 250), (1640, 470), (1790, 250), (1300, 240)):
-            d.line((x, y, x + 120, y - 60), fill=TEAL, width=5)
-            d.ellipse((x + 112, y - 68, x + 128, y - 52), fill=CREAM)
-        for x, y, r in ((760, 260, 14), (1880, 300, 12), (1590, 250, 10)):
-            star(d, x, y, r, RED)
-    return img
+    return img   # the other panel stays a clear navy field, for his line and the word
 
 
 def bubble(img, lines):
@@ -120,12 +114,6 @@ def bubble(img, lines):
         y += part.height + LEADING
 
 
-def jagged(cx, cy, rx, ry, inner=.5, points=32):
-    """a spiky burst's outline, alternately rx/ry and inner times that out"""
-    return [(cx + (1 if i % 2 else inner) * rx * math.cos(i * math.pi * 2 / points),
-             cy + (1 if i % 2 else inner) * ry * math.sin(i * math.pi * 2 / points)) for i in range(points)]
-
-
 def headline(cap, colour):
     """SPACE!!!! as one piece: the word, then four narrow !s at cap height close after it, on one baseline -> RGBA"""
     word, bangs = lettering(SHOUT, cap, colour, track=1), lettering("!!!!", cap, colour, gap=max(2, cap // 40))
@@ -141,41 +129,39 @@ def fitted(cap, width, colour):
     return out if out.width <= width else headline(cap * width // out.width, colour)
 
 
-def shout(img):
-    """SPACE!!!!, as STYLE says"""
-    (shout_launch if STYLE == "launch" else shout_paper)(img)
-
-
-def shout_paper(img):
-    """the slogan printed on the poster: red capitals straight on the panel, nearly its whole width, standing on a
-    cream paper strip at its foot, the teal burst going off behind them. No plate, no tilt, no shadow."""
-    d = ImageDraw.Draw(img); strip = 26
-    d.rectangle((P2[0], P2[3] - strip, P2[2], P2[3]), fill=CREAM)
-    word, room = fitted(210, P2[2] - P2[0] - 50, RED), P2[3] - strip - 10 - (BUBBLE[3] + 26)   # clear of the banner
-    if word.height > room:
-        word = headline(210 * room // word.height, RED)
-    x, y = (P2[0] + P2[2]) // 2 - word.width // 2, P2[3] - strip - 10 - word.height
-    d.polygon(jagged((P2[0] + P2[2]) // 2, y + word.height // 2, 600, word.height // 2 + 40), fill=TEAL)
-    img.paste(word, (x, y), word)
-
-
-def shout_launch(img):
-    """the word as the launch: cream letter faces on a red trail down to the left, three teal launch rays behind it
-    meeting low on the left, the whole word rising 6 degrees to the right. Flat, no outline, the counters open."""
+def word_layers():
+    """SPACE!!!! as the launch, in its two layers, on canvases the same size so they line up: cream letter faces, and
+    the red trail running down to the left from them; both rising 6 degrees to the right -> (face, trail)"""
     face = fitted(142, 860, CREAM)
-    trail = Image.new("RGBA", (face.width + 20, face.height + 20))
     red = Image.new("RGBA", face.size, RED + (255,)); red.putalpha(face.getchannel("A"))
+    top, trail = Image.new("RGBA", (face.width + 20, face.height + 20)), Image.new("RGBA", (face.width + 20, face.height + 20))
     for k in range(18, 0, -1):   # the extrusion, down and to the left
         trail.paste(red, (20 - k, k), red)
-    trail.paste(face, (20, 0), face)
-    word = trail.rotate(6, resample=Image.NEAREST, expand=True)
-    cx, cy = (P2[0] + P2[2]) // 2 + 20, 380
+    top.paste(face, (20, 0), face)
+    return top.rotate(6, resample=Image.NEAREST, expand=True), trail.rotate(6, resample=Image.NEAREST, expand=True)
+
+
+FACE, TRAIL = word_layers()
+WORD_AT = ((P2[0] + P2[2]) // 2 + 20 - FACE.width // 2, 380 - FACE.height // 2)
+
+
+def rays(img):
+    """three teal launch rays, meeting low on the left of the shout's field and running off the panel's right edge"""
     field = img.crop(P2); fd = ImageDraw.Draw(field)
-    meet = (60, P2[3] - P2[1] - 20)                    # the rays meet low on the left of the shout's field
-    for to, half in (((1230, 90), 22), ((1230, 250), 30), ((1230, 410), 18)):   # out past the panel's right edge, apart
+    meet = (60, P2[3] - P2[1] - 20)
+    for to, half in (((1230, 90), 22), ((1230, 250), 30), ((1230, 410), 18)):
         fd.polygon([meet, (to[0], to[1] - half), (to[0], to[1] + half)], fill=TEAL)
     img.paste(field.crop((0, BUBBLE[3] + 16 - P2[1], field.width, field.height)), (P2[0], BUBBLE[3] + 16))   # below the banner
-    img.paste(word, (cx - word.width // 2, cy - word.height // 2), word)
+
+
+def shout(img, trail=True, face=(0, 0)):
+    """SPACE!!!! going off: the rays, the red trail if asked, and the cream face at an offset from where it rests (or
+    none). Flat, no outline, the counters open."""
+    rays(img)
+    if trail:
+        img.paste(TRAIL, WORD_AT, TRAIL)
+    if face is not None:
+        img.paste(FACE, (WORD_AT[0] + face[0], WORD_AT[1] + face[1]), FACE)
 
 
 SAID = [lettering(words, cap, NAVY, track=0 if cap < 40 else 1) for words, cap in LINES]   # his line, a picture a line;
@@ -217,7 +203,25 @@ SHOUTING = POSES[LOOKING[-1]]   # the grin, drawn for good now, so it's in the s
 SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
           for n in range(1, len(LINES) + 1)]
 SHOUT_BOX = (P2[0], BUBBLE[3] + 14, P2[2], P2[3])   # everything below the banner
-SHOUTED = region(lambda img: (bubble(img, len(LINES)), shout(img)), SHOUT_BOX)   # over the banner's whole line
+
+
+def shout_steps():
+    """the shout, step by step, each over the banner's whole line: the rays, then the trail, then the face sliding onto
+    it. The page, the banner and the rays are drawn once; each step only adds its layers."""
+    base = PAGE.copy(); bubble(base, len(LINES)); shout(base, trail=False, face=None)
+    base = base.crop(SHOUT_BOX)
+    out = []
+    for trail, face in ((False, None), (True, None), *((True, at) for at in SLIDE)):
+        img = base.copy(); x0, y0 = SHOUT_BOX[:2]
+        if trail:
+            img.paste(TRAIL, (WORD_AT[0] - x0, WORD_AT[1] - y0), TRAIL)
+        if face is not None:
+            img.paste(FACE, (WORD_AT[0] + face[0] - x0, WORD_AT[1] + face[1] - y0), FACE)
+        out.append(packed(img, x0, y0))
+    return out
+
+
+SHOUT_STEPS = shout_steps()
 SOLID = bytes(1 if v >= 128 else 0 for v in range(256))   # an alpha byte -> 1 where canvas.sprite counts it solid
 
 
@@ -286,11 +290,12 @@ def ease_in(t):
 
 def frames(c, count):
     """count frames (144 by default): the panels drop in, one then the other (0-6%), he rises (6-13%), says his line, a line of the bubble
-    at a time, both up in time to read before he looks up (13-62%), shouts SPACE!!!! (62-66%), the screen shakes
-    (66-72%), and the whole scene blasts off the top on a flame, the new page coming up from below (72-100%)"""
+    at a time, both up in time to read before he looks up (13-60%), shouts SPACE!!!! (60-71%: the rays, the trail, the
+    word sliding up onto it, then a hold), the screen shakes (71-76%), and the whole scene blasts off the top on a flame,
+    the new page coming up from below (76-100%)"""
     n = max(1, count)
     at = lambda f: round(f * n)
-    drop, rise, talk, shout_at, shake_end, launch = at(.06), at(.13), at(.62), at(.66), at(.72), n
+    drop, rise, talk, shout_at, shake_end, launch = at(.06), at(.13), at(.6), at(.71), at(.76), n
     scene, shown, easing, lifted = None, SPEAKING[0], False, 0
     for i in range(n):
         if i < drop:   # the panels drop down over the old page, his first, the other starting halfway through his
@@ -320,25 +325,23 @@ def frames(c, count):
                     put(c, BLENDS[shown, want], screen=True); easing = True
                 else:
                     put(c, POSES[want], screen=True); shown, easing = want, False
-        elif i < shout_at:   # he looks up and shouts: the pose in two halves, then SPACE!!!!
-            j = i - talk
-            if j == 0:
-                put(c, SHOUTING, (0, 0, FIG_W, FIG_H // 2))
-            elif j == 1:
-                put(c, SHOUTING, (0, FIG_H // 2, FIG_W, FIG_H - FIG_H // 2))
-            elif j == 2:
-                put(c, SHOUTED)
+        elif i < shout_at:   # SPACE!!!!: the rays, the trail, then the word slides up onto it as one, and holds;
+            j = i - talk     # his grin is put down for good alongside, in two halves, for the scene that lifts off
+            if j < len(SHOUT_STEPS):
+                put(c, SHOUT_STEPS[j])
+            if j in (0, 1):
+                put(c, SHOUTING, (0, 0, FIG_W, FIG_H // 2) if j == 0 else (0, FIG_H // 2, FIG_W, FIG_H - FIG_H // 2))
         elif i < shake_end:   # the screen shakes as the engines light
             if scene is None:
-                if shout_at - talk < 3:   # too few frames for the shout's three steps: all of it now, before it goes
-                    put(c, SHOUTING); put(c, SHOUTED)
+                if shout_at - talk < len(SHOUT_STEPS):   # too few frames for every step: all of it now, before it goes
+                    put(c, SHOUTING); put(c, SHOUT_STEPS[-1])
                 scene = bytes(c.cur)
             dy = (6, -6, 4, -4, 2, -2, 0)[(i - shout_at) % 7]
             shake(c, scene, dy)
             c.draw(FLAMES[i % len(FLAMES)], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - 60 + abs(dy))
         else:   # lift-off: the scene goes up, faster and faster, on its flame, and the new page comes up from below
             if scene is None:   # no shake at this length either
-                put(c, SHOUTING); put(c, SHOUTED)
+                put(c, SHOUTING); put(c, SHOUT_STEPS[-1])
                 scene = bytes(c.cur)
             k = (i - shake_end + 1) / max(1, launch - shake_end)
             lift = round(ease_in(k) * (HEIGHT + FLAMES[0]["h"]))   # far enough that the flame's tip is off the top too
@@ -359,6 +362,7 @@ def check():
     assert all(big_sprite(img, k) == sprite(img, k) for img, k in ((TALK[0], K), (TALK[3], 3), (TALK[9], 1))), \
         "the runs are the engine's own, exactly"
     assert SHOUT_BOX[2] <= WIDTH and SHOUT_BOX[3] <= HEIGHT and BUBBLE[2] < WIDTH, "SPACE!!!! and the bubble fit"
+    assert len({step[4] for step in SHOUT_STEPS}) == len(SHOUT_STEPS), "every step of the shout is a step"
     from .canvas import Canvas
     size = WIDTH * HEIGHT * 2
     for count in (1, 2, 12, 144, 200):
