@@ -15,7 +15,8 @@ from PIL import Image, ImageDraw
 import kit
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-SECONDS = 5   # 120 frames: the night and the Premier in 0.8 s, his speech to 2.6 s, SPACE!!!! and a shake, the launch
+SECONDS = 6   # 144 frames: the night and the Premier in 0.8 s, his line to 3.7 s, SPACE!!!! and a shake, a 1.7 s launch
+LOOK_UP = .88  # how far through his talking he looks up (frame 8)
 RED, GOLD, INK, PAPER = (204, 26, 26), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 
 # --- the Premier ----------------------------------------------------------------------------------------------------
@@ -30,7 +31,8 @@ TALK = [TALK_ART.crop((i * FRAME_W, 0, (i + 1) * FRAME_W, TALK_ART.height)) for 
 K = 2                                        # drawn at twice the art's size
 FIG_W, FIG_H = SHOUT_ART.width * K, TALK_ART.height * K   # the box both poses fit, his shoulders on the screen's bottom
 FIG_X, FIG_Y = 250, HEIGHT - FIG_H
-SPEAKING = [0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in order; 8 and 9 are him looking up
+SPEAKING = [0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in order, ending on 7, his eyes already
+                                             # drifting up, so 7 -> 8 (looking up) is the last step and never a jump back
 
 # --- the night, the bubble and the shout ----------------------------------------------------------------------------
 BUBBLE = (840, 34, 1886, 238)                # his speech bubble, top right, its tail to his mouth
@@ -139,32 +141,45 @@ FLAMES = [flame((360, 220), s) for s in (1, 2)]   # two, taking turns: it flicke
 FLAME_X = FIG_X + FIG_W // 2 - 180
 
 
-def put(c, box, part=None, keep=True):
-    """copy a packed box (or part of it, (dx, dy, w, h) inside it) to the screen: for good (keep), or for this frame"""
+def put(c, box, part=None, keep=True, screen=False):
+    """copy a packed box (or part of it, (dx, dy, w, h) inside it) to the screen: for good (keep), or for this frame.
+    screen: to the screen only, not the clean copy, for something nothing will wipe or capture before it's replaced"""
     x, y, w, h, data = box
     dx, dy, pw, ph = part or (0, 0, w, h)
-    dsts = (c.cur, c.mm) if keep and c.cur is not None else (c.mm,)
+    dsts = (c.cur, c.mm) if keep and not screen and c.cur is not None else (c.mm,)
     for row in range(max(0, y + dy), min(HEIGHT, y + dy + ph)):
         src = ((row - y) * w + dx) * 2
         a = row * STRIDE + (x + dx) * 2
         for dst in dsts:
             dst[a:a + pw * 2] = data[src:src + pw * 2]
-    if not keep:
+    if not keep and not screen:
         c.dirty.append((x + dx, max(0, y + dy), pw, min(HEIGHT, y + dy + ph) - max(0, y + dy)))
 
 
+def shake(c, scene, dy):
+    """the scene, dy rows down (or up), straight onto the screen: every row, every frame, so there's nothing to wipe,
+    which halves what a frame copies (the edge it uncovers keeps the scene's own rows)"""
+    mm, s = c.mm, dy * STRIDE
+    if dy > 0:
+        mm[:s] = scene[:s]; mm[s:len(scene)] = scene[:len(scene) - s]
+    elif dy < 0:
+        mm[:len(scene) + s] = scene[-s:]; mm[len(scene) + s:len(scene)] = scene[len(scene) + s:]
+    else:
+        mm[:len(scene)] = scene
+
+
 def ease_in(t):
-    return t * t * t
+    return t * t   # gentler than a cube: it still speeds up, without the last frames leaping
 
 
 def frames(c, count):
-    """count frames (120 by default): the night drops in (0-8%), he rises (8-17%), talks while his speech fills in
-    (17-55%), looks up and shouts SPACE!!!! (55-62%), the screen shakes (62-70%), and the whole scene blasts off the
-    top on a flame, the new page coming up from below (70-100%)"""
+    """count frames (144 by default): the night drops in (0-6%), he rises (6-13%), says his line, a line of the bubble
+    at a time, both up in time to read before he looks up (13-62%), shouts SPACE!!!! (62-66%), the screen shakes
+    (66-72%), and the whole scene blasts off the top on a flame, the new page coming up from below (72-100%)"""
     n = max(1, count)
     at = lambda f: round(f * n)
-    drop, rise, talk, shout_at, shake, launch = at(.08), at(.17), at(.55), at(.62), at(.70), n
-    scene, shown = None, POSES[0]
+    drop, rise, talk, shout_at, shake_end, launch = at(.06), at(.13), at(.62), at(.66), at(.72), n
+    scene, shown, lifted = None, POSES[0], 0
     for i in range(n):
         if i < drop:   # the night drops down over the old page, a band a frame
             c.reveal(0, 0, WIDTH, math.ceil(HEIGHT * (i + 1) / max(1, drop)), src=BACK)
@@ -175,14 +190,16 @@ def frames(c, count):
             c.draw(RISING, FIG_X + (FIG_W - RISING["w"]) // 2, FIG_Y + round(FIG_H * (1 - k) ** 2))
             if i == rise - 1:
                 put(c, POSES[0])
-        elif i < talk:   # he talks, a new frame every third: drawn for good when it changes, nothing in between
+        elif i < talk:   # he talks: each pose held about a quarter second at the usual length, spread so it always
+                         # ends on the last one just before he looks up
             k = (i - rise) / max(1, talk - rise)
-            for n, part in enumerate(SPEECH):   # his line, a line at a time, spread across his talking
-                if i == rise + n * (talk - rise) // len(SPEECH):
+            for line, part in enumerate(SPEECH):   # the bubble's first line as he starts, the rest by 40% in
+                if i == rise + round(line * .4 * (talk - rise) / max(1, len(SPEECH) - 1)):
                     put(c, part)
-            frame = POSES[8] if k > .9 else POSES[SPEAKING[((i - rise) // 3) % len(SPEAKING)]]   # 8: he looks up
-            if frame is not shown:   # each of Nula's frames is drawn whole, so all of him changes: ~920 copies, 1 in 3
-                put(c, frame); shown = frame
+            frame = POSES[8] if k > LOOK_UP else POSES[SPEAKING[min(len(SPEAKING) - 1, int(k / LOOK_UP * len(SPEAKING)))]]
+            if frame is not shown:   # each of Nula's frames is drawn whole, so all of him changes, once a hold. Nothing
+                put(c, frame, screen=True); shown = frame   # wipes or captures him before the shout replaces him,
+                                                            # so the screen alone will do: ~460 copies, not ~920
         elif i < shout_at:   # he looks up and shouts: the pose in two halves, then SPACE!!!!
             j = i - talk
             if j == 0:
@@ -193,24 +210,26 @@ def frames(c, count):
                 put(c, SHOUTED)
                 if i == shout_at - 1 and j < 2:   # too few frames for the halves: all of it at once
                     put(c, SHOUTING)
-        elif i < shake:   # the screen shakes as the engines light
+        elif i < shake_end:   # the screen shakes as the engines light
             if scene is None:
                 put(c, SHOUTING); put(c, SHOUTED)   # whatever was skipped, it's all there before it goes
                 scene = bytes(c.cur)
             dy = (6, -6, 4, -4, 2, -2, 0)[(i - shout_at) % 7]
-            if dy:
-                c.rows(dy, scene)
-            c.draw(FLAMES[i % 2], FLAME_X, HEIGHT - 60 + abs(dy))
+            shake(c, scene, dy)
+            c.draw(FLAMES[i % 2], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - 60 + abs(dy))
         else:   # lift-off: the scene goes up, faster and faster, on its flame, and the new page comes up from below
             if scene is None:
                 put(c, SHOUTING); put(c, SHOUTED)
                 scene = bytes(c.cur)
-            k = (i - shake + 1) / max(1, launch - shake)
+            k = (i - shake_end + 1) / max(1, launch - shake_end)
             lift = round(ease_in(k) * (HEIGHT + 240))
-            c.reveal(0, max(0, HEIGHT - lift), WIDTH, lift)
-            if lift < HEIGHT:
-                c.rows(-lift, scene)
-            c.draw(FLAMES[i % 2], FLAME_X, HEIGHT - lift)
+            if i == shake_end:   # the last shake may have left it shifted: straight again before it goes
+                shake(c, scene, 0)
+            c.reveal(0, max(0, HEIGHT - lift), WIDTH, lift - lifted)   # just the rows uncovered since last frame
+            if lift < HEIGHT:   # the scene, lifted, straight onto the screen: the next frame covers it again
+                c.mm[:(HEIGHT - lift) * STRIDE] = scene[lift * STRIDE:]
+            lifted = lift
+            c.draw(FLAMES[i % 2], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - lift)   # it flickers and wobbles every frame
         yield
 
 
@@ -223,8 +242,22 @@ def check():
     assert SHOUT_BOX[2] <= WIDTH and SHOUT_BOX[3] <= HEIGHT and BUBBLE[2] < WIDTH, "SPACE!!!! and the bubble fit"
     from .canvas import Canvas
     size = WIDTH * HEIGHT * 2
-    for count in (1, 2, 12, 120):
+    for count in (1, 2, 12, 144, 200):
         c = Canvas(bytearray(size), b"\x55" * size)
         shown = [bytes(c.mm) for _ in frames(c, count)]
         assert len(shown) == count, count
+    order = []   # the poses he goes through: each of SPEAKING once, in order, then looking up, at any length
+    real = globals()["put"]
+    def spy(c, box, part=None, keep=True, screen=False):
+        if box in POSES.values() and (not order or order[-1] is not box):
+            order.append(box)
+        return real(c, box, part, keep, screen)
+    globals()["put"] = spy
+    try:
+        for count in (144, 200, 96):
+            order.clear(); list(frames(Canvas(bytearray(size), b"\x55" * size), count))
+            want = [POSES[0]] + [POSES[f] for f in SPEAKING[1:]] + [POSES[8]] if count >= 96 else None
+            assert order == want, (count, [next(k for k, v in POSES.items() if v is b) for b in order])
+    finally:
+        globals()["put"] = real
     print("cherdenko: ok")
