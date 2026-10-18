@@ -1,6 +1,7 @@
 """The weather page: Philly's skyline in pixel art on the left, playing the real weather, time of day and season
 (scene.py), and the forecast on the right in the VGA console font: the big temperature, the next 12 hours as a pixel
-chart and the next five days, every temperature in °C.
+chart and the next five days, every temperature in °F or °C (whichever the place uses, unless units says), and the
+other one in smaller type if asked.
 
 It stays up for exactly one 64 s loop of the scene, which plays seamlessly. Open-Meteo (no key) every 10 minutes into
 CACHE, fetched in a background thread so the display never waits on the network. If the network drops, it keeps showing
@@ -8,7 +9,9 @@ the last forecast and says how old it is. The forecast covers 14 days so other p
 
 Options (in playlist.json): lat and lon, for the forecast; place, the heading; landscape, the name of a folder in the
 catalog's landscapes/, to show someone's own scene instead of Philadelphia's (scene.py says what one is). A landscape
-brings its own location, place and credit, and lat, lon and place still win over them.
+brings its own location, place and credit, and lat, lon and place still win over them. units: "f" or "c", the unit
+every temperature is shown in; left out, it's the one people use where the forecast is for (°F in the US). secondary:
+true also shows the other unit, in smaller type beside the big temperature and under each day's.
 """
 import json, math, os, struct, threading, time, urllib.request
 from datetime import date, datetime, timedelta
@@ -36,14 +39,37 @@ WORDS = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "
          96: "thunderstorms", 99: "thunderstorms"}
 
 
+FAHRENHEIT = {"US", "PR", "GU", "VI", "AS", "MP", "UM", "BS", "BZ", "KY", "LR", "PW", "FM", "MH"}   # where °F is everyday
+ZONES = "/usr/share/zoneinfo/zone.tab"   # each time zone's country, from the system's time zone data
+
+
+def fahrenheit(c):
+    return c * 9 / 5 + 32
+
+
+def local_units(w, zones=ZONES):
+    """the unit people use where the forecast is for, from its time zone (the forecast is asked for in the place's own):
+    "f" in the US and the few others, "c" everywhere else, and when it can't tell"""
+    try:
+        country = {z[2]: z[0] for z in (l.rstrip("\n").split("\t") for l in open(zones) if not l.startswith("#")) if len(z) > 2}.get(w.get("timezone"))
+    except OSError:
+        return "c"
+    return "f" if country in FAHRENHEIT else "c"
+
+
 def windtext(c):
     """no wind reading says so, rather than 0 mph (the scene falls back to its default animation speed, a 5 mph breeze)"""
     ws = c["wind_speed_10m"]
     return "wind unavailable" if ws is None else f"{round(ws)} mph {COMPASS[round(c['wind_direction_10m'] / 45) % 8]}"
 
 
-def panel(w, now, age, frame, place="PHILADELPHIA", credit=None):
-    """the right side, 720x515"""
+def panel(w, now, age, frame, place="PHILADELPHIA", credit=None, units=None, secondary=False):
+    """the right side, 720x515. The forecast is in °C, and so are the colours (kit.warmth); units and secondary only
+    change what's written. No units: the place's own"""
+    units = units or local_units(w)
+    as_f, as_c = (lambda c: round(fahrenheit(c))), round
+    shown, unit = (as_f, "°F") if units == "f" else (as_c, "°C")   # the unit everything is shown in
+    other, other_unit = (as_c, "°C") if units == "f" else (as_f, "°F")   # and the other, in small type, if asked
     img = Image.new("RGB", (SCREEN[0] - PANEL, SCREEN[1]), BG); d = ImageDraw.Draw(img)
     c, h, dd = w["current"], w["hourly"], w["daily"]
     X, R = 28, img.width - 24
@@ -60,11 +86,12 @@ def panel(w, now, age, frame, place="PHILADELPHIA", credit=None):
     paste_icon(img, kind(c["weather_code"], c.get("is_day", 1)), frame // 2, (X, 106), 5)
     stale = age > 1800
     hot = DIM if stale else warmth(t)   # an old forecast's big temperature is greyed out, so it doesn't pass for now
-    wide = text(img, (X + 100, 102), f"{round(t)}", hot, scale=6)
-    text(img, (X + 104 + wide, 106), "°C", hot)
+    wide = text(img, (X + 100, 102), f"{shown(t)}", hot, scale=6)
+    text(img, (X + 104 + wide, 106), unit, hot)
     col = X + 184 + wide
     text(img, (col, 106), WORDS.get(c["weather_code"], "")[:20], W)
-    text(img, (col, 142), f"feels {round(c['apparent_temperature'])}°C", G)
+    feels = c["apparent_temperature"]
+    text(img, (col, 142), (f"{other(t)}{other_unit}  " if secondary else "") + f"feels {shown(feels)}{unit}", G)
     wind = windtext(c)
     text(img, (col, 178), f"{round(c['relative_humidity_2m'])}% humid  {wind}", G, scale=1)
     text(img, (col, 196), f"sunrise {clock(dd['sunrise'][0])}  sunset {clock(dd['sunset'][0])}", G, scale=1)
@@ -89,7 +116,7 @@ def panel(w, now, age, frame, place="PHILADELPHIA", credit=None):
         d.rectangle((x + 4, y, x + step - 4, y + 3), fill=warmth(v))
         if i + 1 < len(ys):
             d.rectangle((x + step - 4, min(y, ys[i + 1]), x + step - 1, max(y, ys[i + 1]) + 3), fill=D)
-        label = f"{round(v)}°"
+        label = f"{shown(v)}°"
         text(img, (x + step // 2 - len(label) * 4, y - 20), label, warmth(v), scale=1)
         p = rain[i] or 0
         if p:
@@ -111,8 +138,10 @@ def panel(w, now, age, frame, place="PHILADELPHIA", credit=None):
             text(img, (x + 54, 406), f"{p}% rain", B, scale=1)
         paste_icon(img, kind(dd["weather_code"][i]), frame // 2 + i, (x, 426), 3)
         hi_, lo_ = dd["temperature_2m_max"][i], dd["temperature_2m_min"][i]
-        text(img, (x + 54, 426), f"{round(hi_)}°", warmth(hi_))
-        text(img, (x + 54, 460), f"{round(lo_)}°", warmth(lo_), scale=1)
+        text(img, (x + 54, 426), f"{shown(hi_)}°", warmth(hi_))
+        text(img, (x + 54, 460), f"{shown(lo_)}°", warmth(lo_), scale=1)
+        if secondary:   # the same day in the other unit, small, under it
+            text(img, (x + 54, 476), f"{other(hi_)}/{other(lo_)}{other_unit}", G, scale=1)
 
     if stale:   # a bar across the bottom that reads from across the room
         d.rectangle((8, 480, img.width, img.height), fill=A)
@@ -122,11 +151,11 @@ def panel(w, now, age, frame, place="PHILADELPHIA", credit=None):
     return img
 
 
-def frame(w, now, age, t):
+def frame(w, now, age, t, units=None, secondary=False):
     """one full 1920x515 frame"""
     img = Image.new("RGB", SCREEN, BG)
     img.paste(scene.draw(w, now, t).resize((PANEL, 512), Image.NEAREST), (0, 1))
-    img.paste(panel(w, now, age, 0), (PANEL, 0))
+    img.paste(panel(w, now, age, 0, units=units, secondary=secondary), (PANEL, 0))
     return img
 
 
@@ -198,7 +227,12 @@ class Page:
     weather changes, at night every 5 minutes, as the lit windows reshuffle."""
     name, seconds = "weather", scene.LOOP
 
-    def __init__(self, w=None, lat=None, lon=None, place=None, landscape=None):
+    def __init__(self, w=None, lat=None, lon=None, place=None, landscape=None, units=None, secondary=False):
+        if units not in (None, "c", "f"):
+            raise ValueError(f'units is "f" or "c" (or left out, for the place\'s own), not {units!r}')
+        if not isinstance(secondary, bool):
+            raise ValueError(f"secondary is true or false, not {secondary!r}")
+        self.units, self.secondary = units, secondary
         land = scene.landscape(landscape) if landscape else None   # one that isn't there, or isn't right, says why
         self.land = landscape or None
         self.lat = lat if lat is not None else land["lat"] if land else 39.95
@@ -247,8 +281,8 @@ class Page:
             return self.bg
         if key != self.bg[0]:
             full = Image.new("LA", SCREEN)
-            full.paste(packed(panel(self.w, now, 0 if self.fixed else time.time() - self.mtime, 0, self.place, self.credit)),
-                       (PANEL, 0))
+            full.paste(packed(panel(self.w, now, 0 if self.fixed else time.time() - self.mtime, 0, self.place, self.credit,
+                                    self.units, self.secondary)), (PANEL, 0))
             self.bg = (key, full)
         return self.bg
 
@@ -345,6 +379,34 @@ def check():
         assert panel(SAMPLE, now, 120, 0).tobytes() != fresh.tobytes(), "the skyline's credit is on the panel"
     finally:
         CREDIT = credit
+    assert (fahrenheit(0), fahrenheit(100), round(fahrenheit(16.3))) == (32, 212, 61)
+    lit = lambda img: sum(p != BG for p in img.crop((0, 477, img.width, 491)).getdata())   # the row under each day's high and low
+    drawn = {(u, s): panel(SAMPLE, now, 120, 0, units=u, secondary=s) for u in "cf" for s in (False, True)}
+    assert drawn["c", False].tobytes() == fresh.tobytes(), "°C, and nothing else, is what it always drew"
+    assert len({img.tobytes() for img in drawn.values()}) == 4, "each of the four ways draws differently"
+    assert lit(drawn["c", True]) > lit(drawn["c", False]) and lit(drawn["f", True]) > lit(drawn["f", False]), \
+        "the second unit adds a line under each day"
+    import tempfile
+    with tempfile.TemporaryDirectory() as zd:   # the unit by where the forecast is for, from a zone.tab of our own
+        zones = os.path.join(zd, "zone.tab")
+        open(zones, "w").write("# country\tcoordinates\tTZ\tcomments\nUS\t+404251-0740023\tAmerica/New_York\tEastern (most areas)\n"
+                               "CA\t+4339-07923\tAmerica/Toronto\tEastern - ON & QC (most areas)\nPR\t+182806-0660622\tAmerica/Puerto_Rico\n"
+                               "CZ\t+5005+01426\tEurope/Prague\n")
+        where = lambda tz: local_units({**SAMPLE, "timezone": tz}, zones)
+        assert (where("America/New_York"), where("America/Puerto_Rico")) == ("f", "f"), "°F in the US"
+        assert (where("America/Toronto"), where("Europe/Prague")) == ("c", "c"), "°C next door and everywhere else"
+        assert where(None) == where("Mars/Base") == "c" and local_units(SAMPLE, os.path.join(zd, "none")) == "c", "can't tell: °C"
+    assert panel({**SAMPLE, "timezone": "UTC"}, now, 120, 0).tobytes() == fresh.tobytes(), "left out: the place's own"
+    assert frame(SAMPLE, now, 120, 0.0, "f", True).size == SCREEN
+    assert (Page(units="f", secondary=True).units, Page(units="f", secondary=True).secondary) == ("f", True)
+    assert (Page().units, Page().secondary) == (None, False), "by default, the place's own unit, and no second one"
+    for bad in ({"units": "kelvin"}, {"units": "F"}, {"secondary": "yes"}, {"secondary": 1}):
+        try:
+            Page(**bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"took {bad}")
     wait = waiting(); lit = lambda box: max(sum(p) for p in wait.crop(box).getdata())
     assert lit((600, 190, 1320, 240)) > 600 and lit((400, 260, 1520, 300)) > 600, "the waiting screen names the page and is readable"
     sans = panel(SAMPLE, now, 120, 0)
