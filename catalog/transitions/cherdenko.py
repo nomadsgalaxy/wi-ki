@@ -1,10 +1,10 @@
-"""Premier Cherdenko escapes to space: the old page gives way to a starry night, the Premier rises into view and
-says where he's going, looks up, and with SPACE!!!! the whole scene blasts off the top of the screen on a rocket
-flame, leaving the new page behind it. A fan tribute to Tim Curry's Premier Cherdenko in Red Alert 3 (2008); nothing
+"""Premier Cherdenko escapes to space, as a comic page of two panels, like Johnny-5's: they drop in over the old page,
+the Premier rises into the first and says where he's going in the second, looks up, and with SPACE!!!! the whole page
+blasts off the top of the screen on a rocket flame, leaving the new page behind it. A fan tribute to Tim Curry's Premier Cherdenko in Red Alert 3 (2008); nothing
 official.
 
-The art is Nula's pixel art of the Premier (see "the Premier" below). Everything is drawn once, at import: the night as
-a whole screen, and each pose and the speech as small boxes with the night behind them, so a frame only copies what
+The art is Nula's pixel art of the Premier (see "the Premier" below). Everything is drawn once, at import: the page as
+a whole screen, and each pose and the speech as small boxes with the page behind them, so a frame only copies what
 changes: his head while he talks, a box when something appears, and in the launch one shifted copy of the scene, one
 copy of the new page under it and the flame.
 """
@@ -15,9 +15,11 @@ from PIL import Image, ImageDraw
 import kit
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-SECONDS = 6   # 144 frames: the night and the Premier in 0.8 s, his line to 3.7 s, SPACE!!!! and a shake, a 1.7 s launch
+SECONDS = 6   # 144 frames: the panels and the Premier in 0.8 s, his line to 3.7 s, SPACE!!!! and a shake, a 1.7 s launch
 LOOK_UP = .84  # how far through his talking he looks up (frame 8), then grins (9)
 RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
+DEEP_RED, DOT = (150, 18, 22), (226, 150, 40)   # his panel, and its halftone
+SPACE_BLUE, SPACE_DOT = (38, 58, 150), (64, 92, 196)   # the other panel, and its
 
 # --- the Premier ----------------------------------------------------------------------------------------------------
 # Nula's pixel art of Premier Cherdenko: a 4x3 sheet of him speaking, ending with him looking up and grinning at the
@@ -31,64 +33,92 @@ TALK = [TALK_ART.crop((i * FRAME_W, 0, (i + 1) * FRAME_W, TALK_ART.height)) for 
 K = 2                                        # drawn at twice the art's size
 FIG_W, FIG_H = 255 * K, TALK_ART.height * K   # the box he's drawn in, a little wider than him, his shoulders on the
                                               # screen's bottom
-FIG_X, FIG_Y = 250, HEIGHT - FIG_H
+FIG_X, FIG_Y = 107, HEIGHT - FIG_H             # centred in the first panel
 SPEAKING = [11, 0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in order: a smirk before he starts,
                                                  # ending on 7, his eyes already drifting up, so 7 -> 8 is never a jump back
 LOOKING = [8, 9]                             # then he looks up, and grins at the sky: the face he shouts with
 
-# --- the night, the bubble and the shout ----------------------------------------------------------------------------
-BUBBLE = (840, 34, 1886, 238)                # his speech bubble, top right, its tail to his mouth
-TAIL = [(870, 150), (870, 226), (FIG_X + FIG_W + 14, 268)]   # a wedge off its left side toward his mouth, its tip
-                                                               # just right of him, so his poses never cover it
-LINES = [((878, 84), "I'M ESCAPING TO THE ONE PLACE"), ((878, 144), "NOT CORRUPTED BY CAPITALISM...")]   # his line
+# --- the comic page: two panels, him in the first, his line and SPACE!!!! in the second -------------------------------
+# Like Johnny-5's page: ink gutters, a halftone panel and lettering with a hard ink shadow. His panel runs off the
+# screen's foot, so he can rise into it from below.
+P1, P2 = (12, 12, 712, HEIGHT + 8), (724, 12, 1908, HEIGHT - 12)
+HEAD = (FIG_X + FIG_W // 2, FIG_Y + 150)     # where his head is, for the focus lines
+BUBBLE = (780, 26, 1880, 246)                # an oval, its tail across the gutter to his mouth, its tip just right of him
+TAIL = [(840, 120), (850, 190), (FIG_X + FIG_W + 16, 248)]
+LINES = ["I'M ESCAPING TO THE ONE PLACE", "NOT CORRUPTED BY CAPITALISM..."]   # his line
 SHOUT, SHOUT_K = "SPACE!!!!", 10
-SHOUT_XY = (BUBBLE[0] + (BUBBLE[2] - BUBBLE[0] - len(SHOUT) * 8 * SHOUT_K) // 2, 282)
+DROPS = [(0, (P1[2] + P2[0]) // 2), ((P1[2] + P2[0]) // 2, WIDTH)]   # each panel with the gutters round it, to drop in
+BURST = ((P2[0] + P2[2]) // 2, 380, 500, 118)   # the jagged burst SPACE!!!! goes off in: centre, half width, half height
 
 
-def night():
-    """the whole screen: deep space fading to a red glow at the bottom, with stars"""
-    img = Image.new("RGB", kit.SCREEN); d = ImageDraw.Draw(img)
-    for y in range(0, HEIGHT, 4):   # in 4-pixel bands, like the rest of the pixel art
-        k = y / HEIGHT
-        d.rectangle((0, y, WIDTH, y + 3), fill=(round(8 + 40 * k ** 2), round(10 + 4 * k), round(26 - 12 * k)))
+def page():
+    """the whole screen: the comic page with both panels empty"""
+    img = Image.new("RGB", kit.SCREEN, INK); d = ImageDraw.Draw(img)
+    d.rectangle(P1, fill=DEEP_RED)                        # his panel: red, gold-flecked halftone, focus lines on him
+    lines = img.crop(P1); ld = ImageDraw.Draw(lines); cx, cy = HEAD[0] - P1[0], HEAD[1] - P1[1]
+    for a in range(0, 360, 9):
+        r = math.radians(a)
+        ld.line((cx + 60 * math.cos(r), cy + 60 * math.sin(r), cx + 900 * math.cos(r), cy + 900 * math.sin(r)),
+                fill=RED, width=3)
+    img.paste(lines, P1[:2])
+    for j, y in enumerate(range(P1[1] + 4, HEIGHT, 10)):
+        for x in range(P1[0] + 4 + (5 if j % 2 else 0), P1[2], 10):
+            d.rectangle((x, y, x + 1, y + 1), fill=DOT)
+    d.rectangle(P2, fill=SPACE_BLUE)                      # his line's panel: space, light enough for ink to read
+    for j, y in enumerate(range(P2[1] + 4, P2[3], 10)):   # on, like Johnny-5's panels, halftone and stars
+        for x in range(P2[0] + 4 + (5 if j % 2 else 0), P2[2], 10):
+            d.rectangle((x, y, x + 1, y + 1), fill=SPACE_DOT)
     rnd = random.Random(97)
-    for _ in range(260):
-        x, y, s = rnd.randrange(0, WIDTH, 2), rnd.randrange(0, HEIGHT - 60, 2), rnd.choice((2, 2, 2, 4))
+    for _ in range(160):
+        x, y, s = rnd.randrange(P2[0] + 6, P2[2] - 6, 2), rnd.randrange(P2[1] + 6, P2[3] - 6, 2), rnd.choice((2, 2, 2, 4))
         v = rnd.randrange(150, 256)
         d.rectangle((x, y, x + s - 1, y + s - 1), fill=(v, v, min(255, v + 20)))
+    for box in (P1, P2):                                  # ink borders
+        d.rectangle(box, outline=INK, width=6)
     return img
 
 
 def bubble(img, lines):
-    """the speech bubble, with this many of its lines"""
-    d = ImageDraw.Draw(img)
-    d.rectangle([v + 8 for v in BUBBLE], fill=INK)   # a drop shadow, then a red edge: ink alone is lost on the night
-    d.polygon(TAIL, fill=PAPER, outline=RED, width=6)
-    d.rectangle(BUBBLE, fill=PAPER, outline=RED, width=6)
-    d.line((BUBBLE[0] + 2, TAIL[0][1] + 6, BUBBLE[0] + 2, TAIL[1][1] - 6), fill=PAPER, width=8)   # the tail joins the
-                                                                                                   # bubble, no line across
-    for xy, words in LINES[:lines]:
-        kit.text(img, xy, words, INK, scale=3)
+    """the speech bubble, with this many of its lines: white oval, ink edge, its tail to his mouth"""
+    d = ImageDraw.Draw(img); x0, y0, x1, y1 = BUBBLE
+    d.ellipse((x0 + 8, y0 + 8, x1 + 8, y1 + 8), fill=INK)   # a hard shadow, like the lettering's
+    d.polygon(TAIL, fill=PAPER, outline=INK, width=5)
+    d.ellipse(BUBBLE, fill=PAPER, outline=INK, width=6)
+    d.polygon([(TAIL[0][0] + 6, TAIL[0][1] + 6), (TAIL[1][0] + 4, TAIL[1][1] - 6), (TAIL[2][0] + 40, TAIL[2][1] - 18)],
+              fill=PAPER)                                   # the tail joins the bubble, no line across
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    for n, words in enumerate(LINES[:lines]):
+        kit.text(img, (cx - len(words) * 12, cy - 54 + 60 * n), words, INK, scale=3)
+
+
+def jagged(cx, cy, rx, ry, inner=.8, points=26):
+    """a jagged burst's outline, alternately rx/ry and inner times that out"""
+    return [(cx + (1 if i % 2 else inner) * rx * math.cos(i * math.pi * 2 / points),
+             cy + (1 if i % 2 else inner) * ry * math.sin(i * math.pi * 2 / points)) for i in range(points)]
 
 
 def shout(img):
-    """SPACE!!!!, gold on a red shadow"""
-    x, y = SHOUT_XY
-    kit.text(img, (x + 8, y + 8), SHOUT, RED, scale=SHOUT_K)
+    """SPACE!!!! going off in a red burst: gold comic lettering over a thick ink shadow"""
+    d = ImageDraw.Draw(img); cx, cy, rx, ry = BURST
+    d.polygon([(x + 8, y + 8) for x, y in jagged(*BURST)], fill=INK)
+    d.polygon(jagged(*BURST), fill=RED, outline=INK, width=5)
+    x, y = cx - len(SHOUT) * 4 * SHOUT_K, cy - 8 * SHOUT_K
+    for dx, dy in ((-4, 0), (4, 0), (0, -4), (0, 4), (8, 8)):
+        kit.text(img, (x + dx, y + dy), SHOUT, INK, scale=SHOUT_K)
     kit.text(img, (x, y), SHOUT, GOLD, scale=SHOUT_K)
 
 
 def pose(art):
-    """him at rest, the night behind him, as the figure's box"""
+    """him at rest, his panel behind him, as the figure's box"""
     box = (FIG_X, FIG_Y, FIG_X + FIG_W, HEIGHT)
-    img = NIGHT.crop(box)
+    img = PAGE.crop(box)
     big = art.resize((art.width * K, art.height * K), Image.NEAREST)
     img.paste(big, ((FIG_W - big.width) // 2, FIG_H - big.height), big)
     return img
 
 
-NIGHT = night()
-BACK = kit.rgb565(NIGHT)
+PAGE = page()
+BACK = kit.rgb565(PAGE)
 
 
 def packed(img, x, y):
@@ -97,8 +127,8 @@ def packed(img, x, y):
 
 
 def region(make, box):
-    """the night under box with make() drawn over the whole screen, cut to box -> packed"""
-    img = NIGHT.copy(); make(img)
+    """the page under box with make() drawn over the whole screen, cut to box -> packed"""
+    img = PAGE.copy(); make(img)
     return packed(img.crop(box), box[0], box[1])
 
 
@@ -108,9 +138,9 @@ ORDER = SPEAKING + LOOKING
 BLENDS = {(a, b): packed(Image.blend(SEEN[a], SEEN[b], .5), FIG_X, FIG_Y) for a, b in zip(ORDER, ORDER[1:])}
 # halfway between each pose and the next, shown for one frame as he changes, so his face eases rather than snaps
 SHOUTING = POSES[LOOKING[-1]]   # the grin, drawn for good now, so it's in the scene that lifts off
-SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
+SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, BUBBLE[3] + 16))
           for n in range(1, len(LINES) + 1)]
-SHOUT_BOX = (SHOUT_XY[0] - 4, SHOUT_XY[1] - 4, SHOUT_XY[0] + len(SHOUT) * 8 * SHOUT_K + 12, SHOUT_XY[1] + 16 * SHOUT_K + 12)
+SHOUT_BOX = (BURST[0] - BURST[2] - 4, BURST[1] - BURST[3] - 4, BURST[0] + BURST[2] + 12, BURST[1] + BURST[3] + 12)
 SHOUTED = region(shout, SHOUT_BOX)
 SOLID = bytes(1 if v >= 128 else 0 for v in range(256))   # an alpha byte -> 1 where canvas.sprite counts it solid
 
@@ -126,7 +156,7 @@ def big_sprite(img, k):
     return {"w": w, "h": img.height, "rows": rows}
 
 
-RISING = big_sprite(TALK[SPEAKING[0]], K)               # rising into view, he's drawn see-through over the night
+RISING = big_sprite(TALK[SPEAKING[0]], K)               # rising into view, he's drawn see-through over his panel
 
 
 def flame(size, seed):
@@ -179,7 +209,7 @@ def ease_in(t):
 
 
 def frames(c, count):
-    """count frames (144 by default): the night drops in (0-6%), he rises (6-13%), says his line, a line of the bubble
+    """count frames (144 by default): the panels drop in, one then the other (0-6%), he rises (6-13%), says his line, a line of the bubble
     at a time, both up in time to read before he looks up (13-62%), shouts SPACE!!!! (62-66%), the screen shakes
     (66-72%), and the whole scene blasts off the top on a flame, the new page coming up from below (72-100%)"""
     n = max(1, count)
@@ -187,8 +217,10 @@ def frames(c, count):
     drop, rise, talk, shout_at, shake_end, launch = at(.06), at(.13), at(.62), at(.66), at(.72), n
     scene, shown, easing, lifted = None, SPEAKING[0], False, 0
     for i in range(n):
-        if i < drop:   # the night drops down over the old page, a band a frame
-            c.reveal(0, 0, WIDTH, math.ceil(HEIGHT * (i + 1) / max(1, drop)), src=BACK)
+        if i < drop:   # the panels drop down over the old page, his first, the other starting halfway through his
+            for p, (x0, x1) in enumerate(DROPS):
+                k = min(1, max(0, (i + 1) / max(1, drop) * 1.6 - p * .6))
+                c.reveal(x0, 0, x1 - x0, math.ceil(HEIGHT * k), src=BACK)
         elif i < rise:   # he rises from the bottom edge, decelerating, see-through over the night
             if i == drop:
                 c.reveal(0, 0, WIDTH, HEIGHT, src=BACK)
