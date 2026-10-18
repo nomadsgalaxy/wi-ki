@@ -232,7 +232,7 @@ def frames(c, count):
                 put(c, SHOUTING); put(c, SHOUTED)
                 scene = bytes(c.cur)
             k = (i - shake_end + 1) / max(1, launch - shake_end)
-            lift = round(ease_in(k) * (HEIGHT + 240))
+            lift = round(ease_in(k) * (HEIGHT + FLAMES[0]["h"]))   # far enough that the flame's tip is off the top too
             if i == shake_end:   # the last shake may have left it shifted: straight again before it goes
                 shake(c, scene, 0)
             c.reveal(0, max(0, HEIGHT - lift), WIDTH, lift - lifted)   # just the rows uncovered since last frame
@@ -254,8 +254,12 @@ def check():
     size = WIDTH * HEIGHT * 2
     for count in (1, 2, 12, 144, 200):
         c = Canvas(bytearray(size), b"\x55" * size)
-        shown = [bytes(c.mm) for _ in frames(c, count)]
+        shown, steps = [], frames(c, count)
+        while c.wipe() or next(steps, "done") != "done":   # as play() goes: this frame's decorations off, then the next
+            shown.append(bytes(c.mm))
         assert len(shown) == count, count
+        if count >= 12:   # its own last frame is already the new page, flame and all gone, before play() makes sure
+            assert shown[-1] == b"\x55" * size, f"something's left on the last of {count} frames"
     order = []   # the poses he goes through: each of SPEAKING once, in order, then looking up, at any length
     real = globals()["put"]
     def spy(c, box, part=None, keep=True, screen=False):
