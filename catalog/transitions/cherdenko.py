@@ -172,7 +172,7 @@ def shout_launch(img):
     cx, cy = (P2[0] + P2[2]) // 2 + 20, 380
     field = img.crop(P2); fd = ImageDraw.Draw(field)
     meet = (60, P2[3] - P2[1] - 20)                    # the rays meet low on the left of the shout's field
-    for to, half in (((1230, 150), 26), ((1230, 270), 38), ((1100, 330), 22)):   # out past the panel's right edge
+    for to, half in (((1230, 90), 22), ((1230, 250), 30), ((1230, 410), 18)):   # out past the panel's right edge, apart
         fd.polygon([meet, (to[0], to[1] - half), (to[0], to[1] + half)], fill=TEAL)
     img.paste(field.crop((0, BUBBLE[3] + 16 - P2[1], field.width, field.height)), (P2[0], BUBBLE[3] + 16))   # below the banner
     img.paste(word, (cx - word.width // 2, cy - word.height // 2), word)
