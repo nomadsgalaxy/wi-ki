@@ -98,7 +98,8 @@ def check():
         assert frames[0].count(b"\x00\x00"), f"{name} starts from the old page"
         assert any(f.count(b"\x55\x55") for f in frames[:-2]), f"{name} shows the new page, not just snaps to it"
         moving = sum(a != b for a, b in zip(frames, frames[1:]))
-        assert moving >= len(frames) // 2, f"{name} only moves on {moving} of {len(frames)} frames"   # holds are fine
+        still = round(getattr(THEMES[name], "STILL", 0) * FPS)   # seconds a theme holds still on purpose, for reading
+        assert moving >= (len(frames) - still) // 2, f"{name} only moves on {moving} of {len(frames)} frames"   # holds are fine
     # one or two frames: the themes' own frames() run to the end without a divide by zero. play() would hide that,
     # since a theme failing partway is caught and it lands on the new page anyway. A lone frame is the transition's
     # first (t=0), never the finished page: play() is what ends on the new page.
