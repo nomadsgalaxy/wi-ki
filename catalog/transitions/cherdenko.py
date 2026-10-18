@@ -10,7 +10,7 @@ copy of the new page under it and the flame.
 """
 import math, os, random, re
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 import kit
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
@@ -39,16 +39,20 @@ LOOKING = [8, 9]                             # then he looks up, and grins at th
 
 # --- the poster: two panels on cream paper, him in the first, his line and SPACE!!!! in the second --------------------
 # A Soviet-era propaganda poster's look, around Nula's art (which stays as it is): a few flat colours, no shading,
-# cream paper round dark fields, a spiky sunburst behind him, red stars and comet streaks, and heavy slab lettering on
-# cream bands, the shout on a tilt. His panel runs off the screen's foot, so he can rise into it from below.
+# cream paper round dark fields, a spiky sunburst behind him, red stars and comet streaks, and heavy condensed capitals
+# on cream bands, the shout on a tilt. The lettering is Fira Sans Condensed ExtraBold (fonts/, SIL OFL 1.1, cut down
+# to the characters a line needs), drawn at half size without smoothing and doubled, so its edges are pixels like the
+# art's. His panel runs off the screen's foot, so he can rise into it from below.
 P1, P2 = (12, 12, 712, HEIGHT + 8), (724, 12, 1908, HEIGHT - 12)
 HEAD = (FIG_X + FIG_W // 2, FIG_Y + 150)     # where his head is: the sunburst's centre
-BUBBLE = (790, 34, 1868, 210)                # his line's banner, slanted, its pointer across the gutter to his mouth
-TAIL = [(800, 150), (800, 200), (FIG_X + FIG_W + 16, 248)]
-LINES = ["I'M ESCAPING TO THE ONE PLACE", "NOT CORRUPTED BY CAPITALISM..."]   # his line
-SHOUT, SHOUT_K = "SPACE!!!!", 10
+BUBBLE = (790, 30, 1868, 236)                # his line's banner, slanted, its pointer across the gutter to his mouth
+TAIL = [(800, 160), (800, 214), (FIG_X + FIG_W + 16, 248)]
+# his line, as three deliberate lines, the last two bigger: (words, cap height in pixels)
+LINES = [("I'M ESCAPING TO THE ONE PLACE", 32), ("NOT CORRUPTED", 52), ("BY CAPITALISM...", 52)]
+SHOUT, SHOUT_CAP = "SPACE", 116                # the shout's word, and how tall its capitals are; then four !s
+FONT = os.path.join(kit.HERE, "fonts", "FiraSansCondensed-ExtraBold-subset.ttf")
 DROPS = [(0, (P1[2] + P2[0]) // 2), ((P1[2] + P2[0]) // 2, WIDTH)]   # each panel with the paper round it, to drop in
-BURST = ((P2[0] + P2[2]) // 2, 372, 580, 128)   # the burst SPACE!!!! goes off in: centre, half width, half height
+BURST = ((P2[0] + P2[2]) // 2, 380, 580, 122)   # the burst SPACE!!!! goes off in: centre, half width, half height
 TILT = 4                                        # degrees the shout's band leans, rising to the right
 
 
@@ -58,10 +62,24 @@ def star(d, cx, cy, r, fill):
                 cy - (r if i % 2 == 0 else r * .4) * math.cos(i * math.pi / 5)) for i in range(10)], fill=fill)
 
 
-def slab(img, xy, words, colour, scale):
-    """heavy slab lettering: the console font, thickened by drawing it again a pixel or two to the right"""
-    for dx in range(max(1, scale // 2)):
-        kit.text(img, (xy[0] + dx, xy[1]), words, colour, scale=scale)
+def lettering(words, cap, colour, track=0, gap=None):
+    """words in heavy condensed capitals, cap pixels tall: drawn at half size without smoothing and doubled, track
+    pixels (at half size) taken out between letters, and gap, if given, the space between !s -> an RGBA image, cut to
+    the ink"""
+    probe = ImageFont.truetype(FONT, 100)
+    font = ImageFont.truetype(FONT, max(4, round(cap / 2 * 100 / (probe.getbbox("H")[3] - probe.getbbox("H")[1]))))
+    mask = Image.new("L", (len(words) * font.size + 20, font.size * 2))
+    d = ImageDraw.Draw(mask); d.fontmode = "1"
+    x = 4
+    for i, ch in enumerate(words):
+        d.text((x, font.size // 2), ch, fill=255, font=font)
+        step = font.getlength(ch) - track
+        if gap is not None and ch == "!":   # the !s: narrow, at cap height, close together
+            step = (font.getbbox("!")[2] - font.getbbox("!")[0]) + gap
+        x += step
+    mask = mask.crop(mask.getbbox())
+    out = Image.new("RGBA", mask.size, colour + (255,)); out.putalpha(mask)
+    return out.resize((out.width * 2, out.height * 2), Image.NEAREST)
 
 
 def page():
@@ -88,15 +106,18 @@ def page():
 
 
 def bubble(img, lines):
-    """his line's banner, with this many of its lines: a slanted cream band, a red edge, navy slab lettering, and a
+    """his line's banner, with this many of its lines: a slanted cream band, a hard red shadow, navy capitals, and a
     pointer to his mouth"""
     d = ImageDraw.Draw(img); x0, y0, x1, y1 = BUBBLE; lean = 30
     d.polygon(TAIL, fill=CREAM)
     band = [(x0 + lean, y0), (x1, y0), (x1 - lean, y1), (x0, y1)]
     d.polygon([(x + 10, y + 10) for x, y in band], fill=RED)   # a hard red shadow
     d.polygon(band, fill=CREAM)
-    for n, words in enumerate(LINES[:lines]):
-        slab(img, ((x0 + x1) // 2 - len(words) * 12, (y0 + y1) // 2 - 50 + 56 * n), words, NAVY, 3)
+    y = y0 + (y1 - y0 - TEXT_H) // 2
+    for n, part in enumerate(SAID):
+        if n < lines:
+            img.paste(part, ((x0 + x1) // 2 - part.width // 2, y), part)
+        y += part.height + LEADING
 
 
 def jagged(cx, cy, rx, ry, inner=.5, points=32):
@@ -106,14 +127,23 @@ def jagged(cx, cy, rx, ry, inner=.5, points=32):
 
 
 def shout(img):
-    """SPACE!!!!: red slab letters on a cream band, leaning, over a teal burst"""
+    """SPACE!!!!: one headline in red capitals, the word taking most of the width and four narrow !s at cap height
+    close after it, centred on a cream band and only then leaned, over a teal burst"""
     d = ImageDraw.Draw(img); cx, cy, rx, ry = BURST
     d.polygon(jagged(*BURST), fill=TEAL)
-    w, h = len(SHOUT) * 8 * SHOUT_K + 80, 16 * SHOUT_K + 36
-    band = Image.new("RGBA", (w, h), CREAM + (255,))
-    slab(band, (40, 18), SHOUT, RED, SHOUT_K)
+    word, bangs = lettering(SHOUT, SHOUT_CAP, RED, track=1), lettering("!!!!", SHOUT_CAP, RED, gap=3)
+    space = SHOUT_CAP // 8
+    w, h = word.width + space + bangs.width, max(word.height, bangs.height)
+    band = Image.new("RGBA", (w + 2 * 44, h + 2 * 22), CREAM + (255,))
+    band.paste(word, (44, 22 + h - word.height), word); band.paste(bangs, (44 + word.width + space, 22 + h - bangs.height), bangs)
     band = band.rotate(TILT, resample=Image.NEAREST, expand=True)
     img.paste(band, (cx - band.width // 2, cy - band.height // 2), band)
+
+
+SAID = [lettering(words, cap, NAVY, track=0 if cap < 40 else 1) for words, cap in LINES]   # his line, a picture a line;
+# the small line keeps its spacing, or its apostrophe runs into the letters
+LEADING = 10
+TEXT_H = sum(p.height for p in SAID) + LEADING * (len(SAID) - 1)
 
 
 def pose(art):
@@ -149,7 +179,7 @@ SHOUTING = POSES[LOOKING[-1]]   # the grin, drawn for good now, so it's in the s
 SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
           for n in range(1, len(LINES) + 1)]
 SHOUT_BOX = (P2[0], BURST[1] - BURST[3] - 4, P2[2], P2[3])   # the burst, and the leaning band inside it
-SHOUTED = region(shout, SHOUT_BOX)
+SHOUTED = region(lambda img: (bubble(img, len(LINES)), shout(img)), SHOUT_BOX)   # over the banner's whole line
 SOLID = bytes(1 if v >= 128 else 0 for v in range(256))   # an alpha byte -> 1 where canvas.sprite counts it solid
 
 
