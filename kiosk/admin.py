@@ -35,7 +35,7 @@ most. The log has the client's address, the method, the path (no query) and the 
                       k-<id>.kiosk.local, to be signed off the kiosk; the signed certificate goes in tls/cert.pem
   admin.py --check    self-test (throwaway certificates on 127.0.0.1)
 """
-import hashlib, hmac, html, ipaddress, json, os, re, secrets, socket, ssl, subprocess, sys, threading, time, urllib.parse
+import hashlib, hmac, html, importlib, ipaddress, json, os, re, secrets, socket, ssl, subprocess, sys, threading, time, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -463,6 +463,7 @@ class Setup(BaseHTTPRequestHandler):
         if path == "/logout":
             with self.state.lock:
                 self.state.sessions.pop(self.cookie("__Host-kiosk"), None)
+            settled()   # the owner's done: the kiosk's screen goes back to its pages now, not in ten minutes
             return self.go("/login", cookies={"__Host-kiosk": ""})
         self.reply("Nothing here.", code=404)
 
@@ -655,6 +656,19 @@ def screen(temp, addresses, fingerprint, done=None):
     if done is not None:
         out.update(done=True, next=done)
     return out
+
+
+def settled(path=None):
+    """take "it's set up, log in here" off the kiosk's screen, keeping where to log in and the fingerprint (which only
+    show for a moment each time round). Not while there's a first-boot login to show; anything that won't read is
+    left as it is."""
+    path = path or SETUP
+    try:
+        info = json.load(open(path))
+        if isinstance(info, dict) and info.get("done") and not info.get("user"):
+            write_private(path, {k: v for k, v in info.items() if k not in ("done", "next")})
+    except (OSError, ValueError):
+        pass
 
 
 def change_form(s, note=""):
@@ -1546,6 +1560,16 @@ def check():
             "the screen says where to log in now, keeps the fingerprint to check, and drops the password"
         assert screen(None, [f"https://{ip}"], fingerprint(ipc)) == {"addresses": [f"https://{ip}"], "fingerprint": fingerprint(ipc)}, \
             "after a restart (or a renewal, which restarts it): addresses and the served fingerprint, no password"
+        setup_page = importlib.import_module("pages.setup")
+        assert setup_page.urgent(SETUP), "set up: where to log in now, on the screen ahead of the pages"
+        owner = jar["__Host-kiosk"]
+        csrf = re.search(r'name=csrf value="([^"]+)"', ask("GET", "/", ip, cookies={"__Host-kiosk": owner}, sni=False)[2]).group(1)
+        assert ask("POST", "/logout", ip, {"csrf": csrf}, {"__Host-kiosk": owner}, sni=False)[:2] == (303, "/login")
+        shown = json.load(open(SETUP))
+        assert not setup_page.urgent(SETUP) and "done" not in shown and shown["fingerprint"] == fingerprint(ipc), \
+            "logged out, the screen goes straight back to its pages, still with the fingerprint for next time"
+        write_private(SETUP, {"user": "Kiosk-X", "password": "a-b-c", "done": True}); settled()
+        assert json.load(open(SETUP))["user"] == "Kiosk-X", "a first-boot login is never taken off the screen this way"
         for s in live:
             s.shutdown(); s.server_close()
 
