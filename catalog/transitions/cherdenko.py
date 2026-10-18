@@ -13,17 +13,15 @@ import math, os, random, re
 from PIL import Image, ImageDraw, ImageFont
 
 import kit
+from . import FPS
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-# the story's beats, in seconds, budgeted for reading: his line is 11 words, about 3.5 s at an average reading speed,
-# so all of it stays up and still for 4 s before he looks up; SPACE!!!! holds about 1.3 s once it's formed
-BEATS = {"drop": .35, "rise": .5, "talk": 5.35, "shout": 1.55, "shake": .35, "launch": 1.4}
-SECONDS = sum(BEATS.values())   # 9.5 s, 228 frames; a render server's kiosk gives up after 20 s quiet (remote.py), so
-                                # a transition stays well under that
-LINE_GAP = .4  # seconds between the lines of his speech coming up
-STILL = 5.3    # seconds it holds still on purpose, to be read: his line (4) and SPACE!!!! (1.3); transitions.check()
-               # wants the rest moving
-LOOK_UP = .9   # how far through his talking he looks up (frame 8), then grins (9)
+# his performance, as Anthony timed it: "I'M ESCAPING TO THE ONE PLACE" alone for 3 s, "NOT CORRUPTED" a second,
+# "BY CAPITALISM..." a second, then 3 s of withheld laughter, then he throws his head back for SPACE!!!!
+LINES_AT = (0, 3, 4)   # seconds into his talking that each line of the banner comes up
+SPEAK = 5              # seconds he talks, through the three lines
+SHOUT_HOLD = 1.3       # seconds SPACE!!!! holds once it's formed, to be read
+BEATS = {"drop": .35, "rise": .5, "talk": None, "shout": None, "shake": .35, "launch": 1.4}   # talk and shout: below
 RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 CREAM, NAVY, TEAL = (238, 226, 198), (20, 24, 40), (40, 150, 140)   # the poster's paper, its dark fields, its cool accent
 
@@ -40,9 +38,13 @@ K = 2                                        # drawn at twice the art's size
 FIG_W, FIG_H = 255 * K, TALK_ART.height * K   # the box he's drawn in, a little wider than him, his shoulders on the
                                               # screen's bottom
 FIG_X, FIG_Y = 107, HEIGHT - FIG_H             # centred in the first panel
-SPEAKING = [11, 0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in order: a smirk before he starts,
-                                                 # ending on 7, his eyes already drifting up, so 7 -> 8 is never a jump back
-LOOKING = [8, 9]                             # then he looks up, and grins at the sky: the face he shouts with
+SPEAKING = [11, 0, 1, 2, 6, 10, 0, 1, 2, 6, 4]   # the frames he talks through, in order: a smirk before he starts,
+                                                 # his open-mouthed frames, and his straight face (4) to finish
+LAUGH = [(11, .7), (5, .2), (11, .6), (5, .2), (11, .5), (3, .8)]   # (frame, seconds): withheld laughter, the smirk
+                                                 # breaking into a grin and back, twice, then nearly bursting
+LOOKING = [(7, .2), (8, .2), (9, .25)]           # then his head goes back: eyes up, looking up, and the grin he shouts with
+SCRIPT = [(f, SPEAK / len(SPEAKING)) for f in SPEAKING] + LAUGH + LOOKING   # all of it, (frame, seconds)
+BEATS["talk"] = sum(t for _, t in SCRIPT)
 
 # --- the poster: two panels on cream paper, him in the first, his line and SPACE!!!! in the second --------------------
 # A Soviet-era propaganda poster's look, around Nula's art (which stays as it is): a few flat colours, no shading,
@@ -201,12 +203,12 @@ def region(make, box):
     return packed(img.crop(box), box[0], box[1])
 
 
-SEEN = {i: pose(TALK[i]) for i in sorted(set(SPEAKING + LOOKING))}   # only the ones he uses
+ORDER = [f for f, _ in SCRIPT]
+SEEN = {i: pose(TALK[i]) for i in sorted(set(ORDER))}   # only the ones he uses
 POSES = {i: packed(img, FIG_X, FIG_Y) for i, img in SEEN.items()}
-ORDER = SPEAKING + LOOKING
 BLENDS = {(a, b): packed(Image.blend(SEEN[a], SEEN[b], .5), FIG_X, FIG_Y) for a, b in zip(ORDER, ORDER[1:])}
 # halfway between each pose and the next, shown for one frame as he changes, so his face eases rather than snaps
-SHOUTING = POSES[LOOKING[-1]]   # the grin, drawn for good now, so it's in the scene that lifts off
+SHOUTING = POSES[ORDER[-1]]   # the grin, drawn for good now, so it's in the scene that lifts off
 SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
           for n in range(1, len(LINES) + 1)]
 SHOUT_BOX = (P2[0], BUBBLE[3] + 14, P2[2], P2[3])   # everything below the banner
@@ -229,6 +231,11 @@ def shout_steps():
 
 
 SHOUT_STEPS = shout_steps()
+BEATS["shout"] = len(SHOUT_STEPS) / FPS + SHOUT_HOLD
+SECONDS = sum(BEATS.values())   # 12.8 s, 307 frames; a render server's kiosk gives up after 20 s quiet (remote.py), so
+                                # a transition stays well under that
+STILL = BEATS["talk"] + SHOUT_HOLD   # seconds it holds still on purpose, to be read: his line, his laughter and the
+                                     # shout (only his face moves); transitions.check() wants the rest moving
 SOLID = bytes(1 if v >= 128 else 0 for v in range(256))   # an alpha byte -> 1 where canvas.sprite counts it solid
 
 
@@ -297,10 +304,11 @@ def ease_in(t):
 
 
 def frames(c, count):
-    """count frames (228 by default), in BEATS: the panels drop in, one then the other; he rises; he says his line, a
-    line of the banner every LINE_GAP seconds, and all of it stays up 4 s before he looks up and grins; SPACE!!!! goes
-    off (the rays, the trail, the word sliding up onto it) and holds; the screen shakes; and the whole page blasts off
-    the top on its flame, the new page coming up from below. Times are shares of SECONDS, so any count keeps the shape."""
+    """count frames (307 by default), in BEATS: the panels drop in, one then the other; he rises; he plays SCRIPT, his
+    line coming up a line at a time (LINES_AT), then holding in his laughter, then throwing his head back; SPACE!!!!
+    goes off (the rays, the trail, the word sliding up onto it) and holds; the screen shakes; and the whole page blasts
+    off the top on its flame, the new page coming up from below. Times are shares of SECONDS, so any count keeps the
+    shape."""
     n = max(1, count)
     at = lambda t: round(t / SECONDS * n)   # seconds -> frames
     ends, t = [], 0
@@ -320,16 +328,15 @@ def frames(c, count):
             c.draw(RISING, FIG_X + (FIG_W - RISING["w"]) // 2, FIG_Y + round(FIG_H * (1 - k) ** 2))
             if i == rise - 1:
                 put(c, POSES[SPEAKING[0]])
-        elif i < talk:   # he talks: each pose held about a quarter second at the usual length, spread so it always
-                         # ends on the last one just before he looks up
-            k = (i - rise) / max(1, talk - rise)
-            for line, part in enumerate(SPEECH):   # the banner's lines, LINE_GAP apart from when he starts
-                if i == rise + at(line * LINE_GAP):
+        elif i < talk:   # he plays SCRIPT, and his line comes up a line at a time
+            for line, part in enumerate(SPEECH):
+                if i == rise + at(LINES_AT[line]):
                     put(c, part)
-            if k > LOOK_UP:   # he looks up, then grins at the sky
-                want = LOOKING[min(len(LOOKING) - 1, int((k - LOOK_UP) / (1 - LOOK_UP) * len(LOOKING)))]
-            else:
-                want = SPEAKING[min(len(SPEAKING) - 1, int(k / LOOK_UP * len(SPEAKING)))]
+            when, want = (i - rise) * SECONDS / n, ORDER[-1]
+            for f, t in SCRIPT:
+                if when < t:
+                    want = f; break
+                when -= t
             if want != shown:   # each of Nula's frames is drawn whole, once a hold, to the screen alone: nothing wipes
                                 # or captures him before the shout replaces him, so ~460 copies, not ~920
                 if (shown, want) in BLENDS and not easing:   # a frame halfway first
@@ -375,12 +382,12 @@ def check():
     assert len({step[4] for step in SHOUT_STEPS}) == len(SHOUT_STEPS), "every step of the shout is a step"
     from .canvas import Canvas
     size = WIDTH * HEIGHT * 2
-    from . import FPS
-    # reading time: all three lines up and still for 4 s before he looks up, and the shout formed for 1.2 s
-    assert BEATS["talk"] * LOOK_UP - LINE_GAP * (len(LINES) - 1) >= 4, "time to read his line"
-    assert BEATS["shout"] - len(SHOUT_STEPS) / FPS >= 1.2, "time to read SPACE!!!!"
-    assert STILL <= BEATS["talk"] * LOOK_UP - LINE_GAP * (len(LINES) - 1) + BEATS["shout"] - len(SHOUT_STEPS) / FPS, \
-        "STILL claims no more stillness than the reading holds have"
+    # his timing: the first line alone about 3 s, then a line a second, 3 s holding in his laughter with all of it up,
+    # and the shout formed for over a second; and STILL claims no more than those holds
+    assert LINES_AT[0] == 0 and LINES_AT[1] >= 2.8 and all(b - a >= .8 for a, b in zip(LINES_AT[1:], LINES_AT[2:]))
+    assert LINES_AT[-1] < SPEAK and abs(sum(t for _, t in LAUGH) - 3) < .05, "his withheld laughter, 3 s"
+    assert SHOUT_HOLD >= 1.2, "time to read SPACE!!!!"
+    assert STILL <= BEATS["talk"] + SHOUT_HOLD and SECONDS < 15, "under the render server's 20 s, with room"
     # the flame never lands on the poster in his panel's columns: every frame, drawn with and without it, may only
     # differ there on rows the new page already shows
     count, cols = round(SECONDS * FPS), slice(0, (P1[2] + 8) * 2)
@@ -402,7 +409,7 @@ def check():
             row = slice(r * STRIDE, (r + 1) * STRIDE)
             if a[row][cols] != b[row][cols] and b[row] != new_row:
                 raise AssertionError(f"the flame is over his panel on frame {k}, row {r}")
-    for count in (1, 2, 12, 144, 228):
+    for count in (1, 2, 12, 144, round(SECONDS * FPS)):
         c = Canvas(bytearray(size), b"\x55" * size)
         shown, steps = [], frames(c, count)
         while c.wipe() or next(steps, "done") != "done":   # as play() goes: this frame's decorations off, then the next
@@ -410,7 +417,7 @@ def check():
         assert len(shown) == count, count
         if count >= 12:   # its own last frame is already the new page, flame and all gone, before play() makes sure
             assert shown[-1] == b"\x55" * size, f"something's left on the last of {count} frames"
-    order = []   # the poses he goes through: each of SPEAKING once, in order, then looking up, at any length
+    order = []   # the poses he goes through: SCRIPT in order, each once, at full length or more
     real = globals()["put"]
     def spy(c, box, part=None, keep=True, screen=False):
         if box in POSES.values() and (not order or order[-1] is not box):
@@ -418,9 +425,9 @@ def check():
         return real(c, box, part, keep, screen)
     globals()["put"] = spy
     try:
-        for count in (144, 200, 96):
+        for count in (round(SECONDS * FPS), 400):
             order.clear(); list(frames(Canvas(bytearray(size), b"\x55" * size), count))
-            want = [POSES[f] for f in SPEAKING + LOOKING] if count >= 96 else None
+            want = [POSES[f] for f in ORDER]
             assert order == want, (count, [next(k for k, v in POSES.items() if v is b) for b in order])
     finally:
         globals()["put"] = real
