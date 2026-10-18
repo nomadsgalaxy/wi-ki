@@ -52,8 +52,7 @@ LINES = [("I'M ESCAPING TO THE ONE PLACE", 32), ("NOT CORRUPTED", 52), ("BY CAPI
 SHOUT, SHOUT_CAP = "SPACE", 116                # the shout's word, and how tall its capitals are; then four !s
 FONT = os.path.join(kit.HERE, "fonts", "FiraSansCondensed-ExtraBold-subset.ttf")
 DROPS = [(0, (P1[2] + P2[0]) // 2), ((P1[2] + P2[0]) // 2, WIDTH)]   # each panel with the paper round it, to drop in
-BURST = ((P2[0] + P2[2]) // 2, 380, 580, 122)   # the burst SPACE!!!! goes off in: centre, half width, half height
-TILT = 4                                        # degrees the shout's band leans, rising to the right
+STYLE = "launch"   # how SPACE!!!! is set: "launch" (cream letters on a red trail, launch rays behind) or "paper"
 
 
 def star(d, cx, cy, r, fill):
@@ -97,11 +96,12 @@ def page():
     img.paste(rays, P1[:2])
     for x, y, r in ((60, 70, 22), (650, 60, 16), (90, 330, 14), (640, 300, 20)):
         star(d, P1[0] + x, P1[1] + y, r, RED)
-    for i, (x, y) in enumerate(((820, 470), (1010, 250), (1640, 470), (1790, 250), (1300, 240))):   # comet streaks
-        d.line((x, y, x + 120, y - 60), fill=TEAL, width=5)
-        d.ellipse((x + 112, y - 68, x + 128, y - 52), fill=CREAM)
-    for x, y, r in ((760, 260, 14), (1880, 300, 12), (1590, 250, 10)):
-        star(d, x, y, r, RED)
+    if STYLE == "paper":   # the other panel's comet streaks and stars; the launch keeps that field clear for the word
+        for x, y in ((820, 470), (1010, 250), (1640, 470), (1790, 250), (1300, 240)):
+            d.line((x, y, x + 120, y - 60), fill=TEAL, width=5)
+            d.ellipse((x + 112, y - 68, x + 128, y - 52), fill=CREAM)
+        for x, y, r in ((760, 260, 14), (1880, 300, 12), (1590, 250, 10)):
+            star(d, x, y, r, RED)
     return img
 
 
@@ -126,18 +126,56 @@ def jagged(cx, cy, rx, ry, inner=.5, points=32):
              cy + (1 if i % 2 else inner) * ry * math.sin(i * math.pi * 2 / points)) for i in range(points)]
 
 
+def headline(cap, colour):
+    """SPACE!!!! as one piece: the word, then four narrow !s at cap height close after it, on one baseline -> RGBA"""
+    word, bangs = lettering(SHOUT, cap, colour, track=1), lettering("!!!!", cap, colour, gap=max(2, cap // 40))
+    space = cap // 10
+    out = Image.new("RGBA", (word.width + space + bangs.width, max(word.height, bangs.height)))
+    out.paste(word, (0, out.height - word.height), word); out.paste(bangs, (word.width + space, out.height - bangs.height), bangs)
+    return out
+
+
+def fitted(cap, width, colour):
+    """the headline at cap, or smaller until it's no wider than width"""
+    out = headline(cap, colour)
+    return out if out.width <= width else headline(cap * width // out.width, colour)
+
+
 def shout(img):
-    """SPACE!!!!: one headline in red capitals, the word taking most of the width and four narrow !s at cap height
-    close after it, centred on a cream band and only then leaned, over a teal burst"""
-    d = ImageDraw.Draw(img); cx, cy, rx, ry = BURST
-    d.polygon(jagged(*BURST), fill=TEAL)
-    word, bangs = lettering(SHOUT, SHOUT_CAP, RED, track=1), lettering("!!!!", SHOUT_CAP, RED, gap=3)
-    space = SHOUT_CAP // 8
-    w, h = word.width + space + bangs.width, max(word.height, bangs.height)
-    band = Image.new("RGBA", (w + 2 * 44, h + 2 * 22), CREAM + (255,))
-    band.paste(word, (44, 22 + h - word.height), word); band.paste(bangs, (44 + word.width + space, 22 + h - bangs.height), bangs)
-    band = band.rotate(TILT, resample=Image.NEAREST, expand=True)
-    img.paste(band, (cx - band.width // 2, cy - band.height // 2), band)
+    """SPACE!!!!, as STYLE says"""
+    (shout_launch if STYLE == "launch" else shout_paper)(img)
+
+
+def shout_paper(img):
+    """the slogan printed on the poster: red capitals straight on the panel, nearly its whole width, standing on a
+    cream paper strip at its foot, the teal burst going off behind them. No plate, no tilt, no shadow."""
+    d = ImageDraw.Draw(img); strip = 26
+    d.rectangle((P2[0], P2[3] - strip, P2[2], P2[3]), fill=CREAM)
+    word, room = fitted(210, P2[2] - P2[0] - 50, RED), P2[3] - strip - 10 - (BUBBLE[3] + 26)   # clear of the banner
+    if word.height > room:
+        word = headline(210 * room // word.height, RED)
+    x, y = (P2[0] + P2[2]) // 2 - word.width // 2, P2[3] - strip - 10 - word.height
+    d.polygon(jagged((P2[0] + P2[2]) // 2, y + word.height // 2, 600, word.height // 2 + 40), fill=TEAL)
+    img.paste(word, (x, y), word)
+
+
+def shout_launch(img):
+    """the word as the launch: cream letter faces on a red trail down to the left, three teal launch rays behind it
+    meeting low on the left, the whole word rising 6 degrees to the right. Flat, no outline, the counters open."""
+    face = fitted(142, 860, CREAM)
+    trail = Image.new("RGBA", (face.width + 20, face.height + 20))
+    red = Image.new("RGBA", face.size, RED + (255,)); red.putalpha(face.getchannel("A"))
+    for k in range(18, 0, -1):   # the extrusion, down and to the left
+        trail.paste(red, (20 - k, k), red)
+    trail.paste(face, (20, 0), face)
+    word = trail.rotate(6, resample=Image.NEAREST, expand=True)
+    cx, cy = (P2[0] + P2[2]) // 2 + 20, 380
+    field = img.crop(P2); fd = ImageDraw.Draw(field)
+    meet = (60, P2[3] - P2[1] - 20)                    # the rays meet low on the left of the shout's field
+    for to, half in (((1230, 150), 26), ((1230, 270), 38), ((1100, 330), 22)):   # out past the panel's right edge
+        fd.polygon([meet, (to[0], to[1] - half), (to[0], to[1] + half)], fill=TEAL)
+    img.paste(field.crop((0, BUBBLE[3] + 16 - P2[1], field.width, field.height)), (P2[0], BUBBLE[3] + 16))   # below the banner
+    img.paste(word, (cx - word.width // 2, cy - word.height // 2), word)
 
 
 SAID = [lettering(words, cap, NAVY, track=0 if cap < 40 else 1) for words, cap in LINES]   # his line, a picture a line;
@@ -178,7 +216,7 @@ BLENDS = {(a, b): packed(Image.blend(SEEN[a], SEEN[b], .5), FIG_X, FIG_Y) for a,
 SHOUTING = POSES[LOOKING[-1]]   # the grin, drawn for good now, so it's in the scene that lifts off
 SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
           for n in range(1, len(LINES) + 1)]
-SHOUT_BOX = (P2[0], BURST[1] - BURST[3] - 4, P2[2], P2[3])   # the burst, and the leaning band inside it
+SHOUT_BOX = (P2[0], BUBBLE[3] + 14, P2[2], P2[3])   # everything below the banner
 SHOUTED = region(lambda img: (bubble(img, len(LINES)), shout(img)), SHOUT_BOX)   # over the banner's whole line
 SOLID = bytes(1 if v >= 128 else 0 for v in range(256))   # an alpha byte -> 1 where canvas.sprite counts it solid
 
