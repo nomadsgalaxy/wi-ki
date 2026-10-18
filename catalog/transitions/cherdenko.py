@@ -23,7 +23,7 @@ RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (
 # Nula's pixel art of Premier Cherdenko: a 4x3 sheet of him speaking, and him looking up, mouth open,
 # shouting SPACE. Reduced to sprites in kiosk/art/: twelve frames 237x230 cut to one shared box so he doesn't jump between
 # them (cherdenko-talk.png, in a row), and the shout, 255x230 (cherdenko-space.png); stray edge pixels taken off, and 64
-# colours shared by both. Drawn at 2x. The character is Red Alert 3's, played by Tim Curry: a fan tribute, for our kiosks.
+# colours shared by both, and each frame shifted to line up on his shoulders, so his body doesn't hop. Drawn at 2x. The character is Red Alert 3's, played by Tim Curry: a fan tribute, for our kiosks.
 TALK_ART = Image.open(os.path.join(kit.HERE, "art", "cherdenko-talk.png")).convert("RGBA")
 SHOUT_ART = Image.open(os.path.join(kit.HERE, "art", "cherdenko-space.png")).convert("RGBA")
 FRAME_W = 237
@@ -101,7 +101,11 @@ def region(make, box):
     return packed(img.crop(box), box[0], box[1])
 
 
-POSES = {i: packed(pose(TALK[i]), FIG_X, FIG_Y) for i in sorted(set(SPEAKING + LOOKING))}   # only the ones he uses
+SEEN = {i: pose(TALK[i]) for i in sorted(set(SPEAKING + LOOKING))}   # only the ones he uses
+POSES = {i: packed(img, FIG_X, FIG_Y) for i, img in SEEN.items()}
+ORDER = SPEAKING + LOOKING
+BLENDS = {(a, b): packed(Image.blend(SEEN[a], SEEN[b], .5), FIG_X, FIG_Y) for a, b in zip(ORDER, ORDER[1:])}
+# halfway between each pose and the next, shown for one frame as he changes, so his face eases rather than snaps
 SHOUTING = packed(pose(SHOUT_ART), FIG_X, FIG_Y)
 SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
           for n in range(1, len(LINES) + 1)]
@@ -180,7 +184,7 @@ def frames(c, count):
     n = max(1, count)
     at = lambda f: round(f * n)
     drop, rise, talk, shout_at, shake_end, launch = at(.06), at(.13), at(.62), at(.66), at(.72), n
-    scene, shown, lifted = None, POSES[SPEAKING[0]], 0
+    scene, shown, easing, lifted = None, SPEAKING[0], False, 0
     for i in range(n):
         if i < drop:   # the night drops down over the old page, a band a frame
             c.reveal(0, 0, WIDTH, math.ceil(HEIGHT * (i + 1) / max(1, drop)), src=BACK)
@@ -198,12 +202,15 @@ def frames(c, count):
                 if i == rise + round(line * .4 * (talk - rise) / max(1, len(SPEECH) - 1)):
                     put(c, part)
             if k > LOOK_UP:   # he looks up, then grins at the sky
-                frame = POSES[LOOKING[min(len(LOOKING) - 1, int((k - LOOK_UP) / (1 - LOOK_UP) * len(LOOKING)))]]
+                want = LOOKING[min(len(LOOKING) - 1, int((k - LOOK_UP) / (1 - LOOK_UP) * len(LOOKING)))]
             else:
-                frame = POSES[SPEAKING[min(len(SPEAKING) - 1, int(k / LOOK_UP * len(SPEAKING)))]]
-            if frame is not shown:   # each of Nula's frames is drawn whole, so all of him changes, once a hold. Nothing
-                put(c, frame, screen=True); shown = frame   # wipes or captures him before the shout replaces him,
-                                                            # so the screen alone will do: ~460 copies, not ~920
+                want = SPEAKING[min(len(SPEAKING) - 1, int(k / LOOK_UP * len(SPEAKING)))]
+            if want != shown:   # each of Nula's frames is drawn whole, once a hold, to the screen alone: nothing wipes
+                                # or captures him before the shout replaces him, so ~460 copies, not ~920
+                if (shown, want) in BLENDS and not easing:   # a frame halfway first
+                    put(c, BLENDS[shown, want], screen=True); easing = True
+                else:
+                    put(c, POSES[want], screen=True); shown, easing = want, False
         elif i < shout_at:   # he looks up and shouts: the pose in two halves, then SPACE!!!!
             j = i - talk
             if j == 0:
