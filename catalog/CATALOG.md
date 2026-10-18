@@ -23,7 +23,7 @@ Installing a pack asks for anything it needs a fresh API token or a server for, 
 | septa | page | public | is SEPTA fucked? Installing it asks whether to say "fcked" (sfw) | one, on main `a3f531` | isseptafucked.com, asks: sfw | unchecked |
 | sports | page | public | every Philly team's score, next game and record | one, on main `cded34` | site.api.espn.com, a.espncdn.com | unchecked |
 | system | page | public | my desktop's CPU, GPU, memory and network, live. The owner will pick what it shows, but the code doesn't do that yet. Needs the system feed (feed/sysfeed.py) on the desktop it shows: feed/README.md has the steps. | one, on main `e0da7d` | asks: file, render server | unchecked |
-| weather | page | public | Philly's skyline playing the real weather, and the forecast | one, on main `0ca1f8` | api.open-meteo.com | unchecked |
+| weather | page | public | Philly's skyline playing the real weather, and the forecast | one, on main `c5ead1` | api.open-meteo.com | unchecked |
 | coreone | transition | public | the page is printed layer by layer by a hotend | one, on main `9f47db` | – | unchecked |
 | hackerman | transition | public | a neon terminal hacks time while the page glitches in | one, on main `859d09` | – | unchecked |
 | hive76 | transition | public | honeycomb cells fill with honey, and a bee flies past | one, on main `f7f4b1` | – | unchecked |
