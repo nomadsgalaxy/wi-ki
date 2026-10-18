@@ -1,5 +1,5 @@
 """Premier Cherdenko escapes to space: the old page gives way to a starry night, the Premier rises into view and
-addresses his comrades, looks up, and with SPAAAACE! the whole scene blasts off the top of the screen on a rocket
+says where he's going, looks up, and with SPACE!!!! the whole scene blasts off the top of the screen on a rocket
 flame, leaving the new page behind it. A fan tribute to Tim Curry's Premier Cherdenko in Red Alert 3 (2008); nothing
 official.
 
@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 import kit
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-SECONDS = 5   # 120 frames: the night and the Premier in 0.8 s, his speech to 2.6 s, SPAAAACE! and a shake, the launch
+SECONDS = 5   # 120 frames: the night and the Premier in 0.8 s, his speech to 2.6 s, SPACE!!!! and a shake, the launch
 RED, GOLD, INK, PAPER = (204, 26, 26), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 
 # --- the Premier ----------------------------------------------------------------------------------------------------
@@ -36,9 +36,8 @@ SPEAKING = [0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in o
 BUBBLE = (840, 34, 1886, 238)                # his speech bubble, top right, its tail to his mouth
 TAIL = [(880, 226), (985, 226), (FIG_X + FIG_W + 20, 262)]   # a wedge off its bottom, its tip just right of him,
                                                                # so his poses never cover it
-LINES = [((878, 60), "COMRADES! I MUST LEAVE YOU NOW."), ((878, 112), "I GO WHERE THEY CAN NEVER"),
-         ((878, 164), "FOLLOW...")]
-SHOUT, SHOUT_K = "SPAAAACE!", 10
+LINES = [((878, 84), "I'M ESCAPING TO THE ONE PLACE"), ((878, 144), "NOT CORRUPTED BY CAPITALISM...")]   # his line
+SHOUT, SHOUT_K = "SPACE!!!!", 10
 SHOUT_XY = (BUBBLE[0] + (BUBBLE[2] - BUBBLE[0] - len(SHOUT) * 8 * SHOUT_K) // 2, 282)
 
 
@@ -67,7 +66,7 @@ def bubble(img, lines):
 
 
 def shout(img):
-    """SPAAAACE!, gold on a red shadow"""
+    """SPACE!!!!, gold on a red shadow"""
     x, y = SHOUT_XY
     kit.text(img, (x + 8, y + 8), SHOUT, RED, scale=SHOUT_K)
     kit.text(img, (x, y), SHOUT, GOLD, scale=SHOUT_K)
@@ -100,7 +99,7 @@ def region(make, box):
 POSES = {i: packed(pose(TALK[i]), FIG_X, FIG_Y) for i in sorted(set(SPEAKING) | {8})}   # only the ones he uses
 SHOUTING = packed(pose(SHOUT_ART), FIG_X, FIG_Y)
 SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 8, TAIL[2][1] + 8))
-          for n in (1, 2, 3)]
+          for n in range(1, len(LINES) + 1)]
 SHOUT_BOX = (SHOUT_XY[0] - 4, SHOUT_XY[1] - 4, SHOUT_XY[0] + len(SHOUT) * 8 * SHOUT_K + 12, SHOUT_XY[1] + 16 * SHOUT_K + 12)
 SHOUTED = region(shout, SHOUT_BOX)
 SOLID = bytes(1 if v >= 128 else 0 for v in range(256))   # an alpha byte -> 1 where canvas.sprite counts it solid
@@ -160,7 +159,7 @@ def ease_in(t):
 
 def frames(c, count):
     """count frames (120 by default): the night drops in (0-8%), he rises (8-17%), talks while his speech fills in
-    (17-55%), looks up and shouts SPAAAACE! (55-62%), the screen shakes (62-70%), and the whole scene blasts off the
+    (17-55%), looks up and shouts SPACE!!!! (55-62%), the screen shakes (62-70%), and the whole scene blasts off the
     top on a flame, the new page coming up from below (70-100%)"""
     n = max(1, count)
     at = lambda f: round(f * n)
@@ -178,16 +177,13 @@ def frames(c, count):
                 put(c, POSES[0])
         elif i < talk:   # he talks, a new frame every third: drawn for good when it changes, nothing in between
             k = (i - rise) / max(1, talk - rise)
-            if i == rise:
-                put(c, SPEECH[0])
-            if i == rise + (talk - rise) // 3:
-                put(c, SPEECH[1])
-            if i == rise + 2 * (talk - rise) // 3:
-                put(c, SPEECH[2])
+            for n, part in enumerate(SPEECH):   # his line, a line at a time, spread across his talking
+                if i == rise + n * (talk - rise) // len(SPEECH):
+                    put(c, part)
             frame = POSES[8] if k > .9 else POSES[SPEAKING[((i - rise) // 3) % len(SPEAKING)]]   # 8: he looks up
             if frame is not shown:   # each of Nula's frames is drawn whole, so all of him changes: ~920 copies, 1 in 3
                 put(c, frame); shown = frame
-        elif i < shout_at:   # he looks up and shouts: the pose in two halves, then SPAAAACE!
+        elif i < shout_at:   # he looks up and shouts: the pose in two halves, then SPACE!!!!
             j = i - talk
             if j == 0:
                 put(c, SHOUTING, (0, 0, FIG_W, FIG_H // 2))
@@ -224,7 +220,7 @@ def check():
     assert SHOUT_ART.height == TALK_ART.height and FIG_W >= TALK[0].width * K, "the shout fits the same box"
     assert all(big_sprite(img, k) == sprite(img, k) for img, k in ((TALK[0], K), (TALK[3], 3), (SHOUT_ART, 1))), \
         "the runs are the engine's own, exactly"
-    assert SHOUT_BOX[2] <= WIDTH and SHOUT_BOX[3] <= HEIGHT and BUBBLE[2] < WIDTH, "SPAAAACE! and the bubble fit"
+    assert SHOUT_BOX[2] <= WIDTH and SHOUT_BOX[3] <= HEIGHT and BUBBLE[2] < WIDTH, "SPACE!!!! and the bubble fit"
     from .canvas import Canvas
     size = WIDTH * HEIGHT * 2
     for count in (1, 2, 12, 120):
