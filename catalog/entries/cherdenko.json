@@ -19,7 +19,7 @@
  "ask": [],
  "licence": {
   "code": "MIT",
-  "assets": "CC BY-SA 4.0. kiosk/art/cherdenko-talk.png (twelve frames of him speaking) and cherdenko-space.png (the shout) are Nula's pixel art, reduced here (cut to one box, stray edge pixels taken off, 64 colours). Premier Cherdenko is Red Alert 3's (2008) character, played by Tim Curry: an unofficial fan tribute, for our own kiosks",
+  "assets": "CC BY-SA 4.0. kiosk/art/cherdenko-talk.png (twelve frames of him speaking) is Nula's pixel art, reduced here (cut to one box, lined up on his shoulders, stray edge pixels taken off, 64 colours). Premier Cherdenko is Red Alert 3's (2008) character, played by Tim Curry: an unofficial fan tribute, for our own kiosks",
   "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine"
  },
  "quality": {
