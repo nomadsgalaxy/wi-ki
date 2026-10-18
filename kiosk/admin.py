@@ -41,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves our own folder off the path
 
-import config, link, packs  # noqa: E402
+import config, link, look, packs  # noqa: E402
 
 CONF = os.path.dirname(config.PATH)
 TLS = os.path.join(CONF, "tls")
@@ -437,7 +437,7 @@ class Setup(BaseHTTPRequestHandler):
         if s["temporary"] and path != "/change":
             return self.go("/change")
         if path == "/change":
-            return self.reply(page(self.state.cfg["id"], ("" if s["temporary"] else NAV) + change_form(s)))
+            return self.reply(page(self.state.cfg["id"], ("" if s["temporary"] else nav("/change")) + change_form(s)))
         if path == "/":
             return self.reply(page(self.state.cfg["id"], status_page(self.state, s["csrf"])))
         if path in SETTINGS:
@@ -624,30 +624,25 @@ class Redirect(BaseHTTPRequestHandler):
 
 
 def page(kiosk, body):
-    return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>{html.escape(kiosk)}: setup</title><style>body{{font:18px system-ui,sans-serif;max-width:40em;margin:2em auto;padding:0 1em;
-background:#0c0e14;color:#ebebeb}}input,button{{font:inherit;width:100%;padding:.6em;margin:.3em 0 1em;box-sizing:border-box;
-border-radius:8px;border:1px solid #445}}button{{background:#f6911f;color:#000;border:0}}.note{{color:#f6911f}}
-footer{{margin-top:3em;font-size:13px}}footer a{{color:#889}}nav a{{color:#f6911f}}small{{color:#99a}}li{{margin:.8em 0}}
-.off{{opacity:.6}}th{{text-align:left;padding-right:1em;vertical-align:top}}form.inline{{display:inline}}
-form.inline button,form.inline input{{width:auto;padding:.3em .7em;margin:.2em .2em .2em 0}}.check{{display:block;margin:.5em 0}}
-.check input{{width:auto;margin-right:.5em}}</style>
-<h1>{html.escape(kiosk)}</h1>{body}{FOOTER}"""
+    """a whole setup page: the title bar, then body (its tabs and panels), then the engine's credit"""
+    return f"""<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>{html.escape(kiosk)}: setup</title><style>{look.CSS}</style>
+<div class=term><header><h1>WI-KI SETUP</h1><span>{html.escape(kiosk)}</span></header><main>{body}</main></div>{FOOTER}"""
 
 
 # the engine's credit: the page's one link off the kiosk, which tells that site nothing
 FOOTER = '<footer><a href="https://nomadsgalaxy.com" rel="noopener noreferrer">Built By NomadsGalaxy</a></footer>'
 
 
-LOGIN_FORM = """<p>Until you've set your own, the user name and password are on the kiosk's screen.</p><p class=note>{note}</p>
-<form method=post action=/login><input type=hidden name=pre value="{pre}"><label>User name<input name=user autocomplete=username></label>
-<label>Password<input name=password type=password autocomplete=current-password></label><button>Log in</button></form>"""
-CHANGE_FORM = """<p>{intro}</p>
-<p class=note>{note}</p><form method=post action=/change><input type=hidden name=csrf value="{csrf}">{current}
+LOGIN_FORM = """<fieldset><legend>Log in</legend><p>Until you've set your own, the user name and password are on the kiosk's screen.</p>
+<p class=note>{note}</p><form method=post action=/login class=go><input type=hidden name=pre value="{pre}"><label>User name<input name=user autocomplete=username></label>
+<label>Password<input name=password type=password autocomplete=current-password></label><button>Log in</button></form></fieldset>"""
+CHANGE_FORM = """<fieldset><legend>Your login</legend><p>{intro}</p>
+<p class=note>{note}</p><form method=post action=/change class=go><input type=hidden name=csrf value="{csrf}">{current}
 <label>User name<input name=user autocomplete=username></label><label>New password (12 characters or more)<input name=password type=password autocomplete=new-password></label>
-<label>Again<input name=again type=password autocomplete=new-password></label><button>Save</button></form>"""
-DONE = """<p>Saved. Setting it up by IP address was only for the first login, so this connection is finished.
-From now on, log in at:</p><ul>{ways}</ul>"""
+<label>Again<input name=again type=password autocomplete=new-password></label><button>Save</button></form></fieldset>"""
+DONE = """<fieldset><legend>Saved</legend><p>Saved. Setting it up by IP address was only for the first login, so this connection is finished.
+From now on, log in at:</p><ul>{ways}</ul></fieldset>"""
 def screen(temp, addresses, fingerprint, done=None):
     """what the kiosk's own screen shows about its setup page (pages/setup): the first-boot login while there is one,
     where to log in once it's set up, and, while it can be reached by IP, the addresses and the fingerprint of the
@@ -860,12 +855,21 @@ def change_transitions(form, names):
 
 
 
-NAV = """<nav><a href=/>Status</a> · <a href=/pages>Pages</a> · <a href=/transitions>Transitions</a> · <a href=/install>Install</a> · <a href=/location>Location</a>
-· <a href=/change>Login</a></nav>"""
+TABS = [("/", "Status"), ("/pages", "Pages"), ("/transitions", "Transitions"), ("/install", "Install"),
+        ("/location", "Location"), ("/change", "Login")]
+
+
+def nav(here=None):
+    """the tabs, the one being shown marked as such"""
+    return "<nav>" + "".join(f'<a href={path}{" aria-current=page" if path == here else ""}>{name}</a>'
+                             for path, name in TABS) + "</nav>"
+
+
+NAV = nav()
 
 
 def logout(csrf):
-    return f'<form method=post action=/logout><input type=hidden name=csrf value="{csrf}"><button>Log out</button></form>'
+    return f'<form method=post action=/logout><input type=hidden name=csrf value="{csrf}"><button>log out</button></form>'
 
 
 def elsewhere(drawn_by):
@@ -878,7 +882,9 @@ def elsewhere(drawn_by):
 
 
 def unreachable(title, e):
-    return f"{NAV}<h2>{title}</h2><p class=note>Couldn't reach its render server ({html.escape(str(e))}), so there's nothing to show here right now.</p>"
+    here = next((path for path, name in TABS if name == title), None)
+    return nav(here) + look.panel(title, f"<p class=note>Couldn't reach its render server ({html.escape(str(e))}), so "
+                                         "there's nothing to show here right now.</p>")
 
 
 def status_page(st, csrf):
@@ -897,7 +903,7 @@ def status_page(st, csrf):
             ("Transitions off", ", ".join(now["off"]) or "none"),
             ("Setup by IP", "on" if by_ip(st.cfg, st.login) else "off")]
     table = "".join(f"<tr><th>{html.escape(k)}<td>{html.escape(v)}" for k, v in rows if v)
-    return f"{NAV}<h2>Status</h2><table>{table}</table>{logout(csrf)}"
+    return nav("/") + look.panel("Status", f"<table>{table}</table>{logout(csrf)}")
 
 
 def read_text(path):
@@ -907,10 +913,11 @@ def read_text(path):
         return ""
 
 
-def button(csrf, action, label, i=None, extra=""):
+def button(csrf, action, label, i=None, extra="", danger=False):
     hidden = f'<input type=hidden name=i value="{i}">' if i is not None else ""
     return (f'<form method=post action=/pages class=inline><input type=hidden name=csrf value="{csrf}">'
-            f'<input type=hidden name=action value="{action}">{hidden}{extra}<button>{label}</button></form>')
+            f'<input type=hidden name=action value="{action}">{hidden}{extra}<button{" class=danger" if danger else ""}>'
+            f'{label}</button></form>')
 
 
 def pages_page(csrf, note=""):
@@ -925,25 +932,28 @@ def pages_page(csrf, note=""):
         about = known.get(e["page"], {}).get("about", "")
         seconds = (f'<form method=post action=/pages class=inline><input type=hidden name=csrf value="{csrf}">'
                    f'<input type=hidden name=action value=seconds><input type=hidden name=i value="{i}">'
-                   f'<input name=seconds size=4 value="{html.escape(str(e.get("seconds", "")))}" placeholder=default>'
-                   f'<button>Set</button></form>')
-        controls = "" if ro else (button(csrf, "off" if on else "on", "Turn off" if on else "Turn on", i) +
-                                        button(csrf, "up", "↑", i) + button(csrf, "down", "↓", i) +
-                                        button(csrf, "remove", "Remove", i) + seconds)
-        rows.append(f"<li class={'on' if on else 'off'}><b>{html.escape(e['page'])}</b> {'' if on else '(off)'}"
-                    f"<br><small>{html.escape(about)}</small><br>{controls}")
+                   f'<label>seconds <input name=seconds inputmode=numeric value="{html.escape(str(e.get("seconds", "")))}" '
+                   f'placeholder=own></label><button>set</button></form>')
+        controls = "" if ro else (button(csrf, "off" if on else "on", "turn off" if on else "turn on", i) +
+                                  button(csrf, "up", "↑ up", i) + button(csrf, "down", "↓ down", i) +
+                                  button(csrf, "remove", "remove", i, danger=True) + seconds)
+        rows.append(f"<li class='item {'on' if on else 'off'}'><span class=n>{i + 1:02}</span>"
+                    f"<span class=name>{html.escape(e['page'])}</span><span class=tag>{'ON' if on else 'OFF'}</span>"
+                    f"<small>{html.escape(about)}</small><div class=actions>{controls}</div>")
     adds = []
     for name, entry in sorted(known.items()):
         if entry.get("kind") != "page" or any(e["page"] == name for e in entries):
             continue
         why = unusable(entry, drawn_by)
-        adds.append(f"<li><b>{html.escape(name)}</b> <small>{html.escape(entry.get('about', ''))}</small><br>" +
+        adds.append(f"<li class='item bare'><span class=name>{html.escape(name)}</span><span></span>"
+                    f"<small>{html.escape(entry.get('about', ''))}</small><div class=actions>" +
                     (f"<small class=note>Can't: {html.escape(why)}</small>" if why else
-                     "" if ro else button(csrf, "add", "Add", extra=f'<input type=hidden name=page value="{html.escape(name)}">')))
-    return (f"{NAV}<h2>Pages</h2>{elsewhere(drawn_by) if drawn_by else ''}<p class=note>{html.escape(note)}</p>"
-            f"<p>{'This kiosk has its own playlist.' if own else 'It runs the repo playlist until you change something here.'}"
-            f" A page with no seconds set stays up for its own time.</p><ol>{''.join(rows)}</ol>"
-            f"<h2>More pages</h2><ul>{''.join(adds) or '<li>Every page is in the playlist.'}</ul>")
+                     "" if ro else button(csrf, "add", "add", extra=f'<input type=hidden name=page value="{html.escape(name)}">'))
+                    + "</div>")
+    return (nav("/pages") + (elsewhere(drawn_by) if drawn_by else "") + f"<p class=note>{html.escape(note)}</p>"
+            + look.panel("Playlist", f"<p>{'This kiosk has its own playlist.' if own else 'It runs the repo playlist until you change something here.'}"
+                                     f" A page with no seconds set stays up for its own time.</p><ol>{''.join(rows)}</ol>")
+            + look.panel("More pages", f"<ul>{''.join(adds) or '<li>Every page is in the playlist.'}</ul>"))
 
 
 def transitions_page(csrf, note=""):
@@ -955,9 +965,10 @@ def transitions_page(csrf, note=""):
     boxes = "".join(f'<label class=check><input type=checkbox name="t_{n}" value=on{"" if n in off else " checked"}'
                     f'{" disabled" if ro else ""}> <b>{html.escape(n)}</b> '
                     f'<small>{html.escape(known.get(n, {}).get("about", ""))}</small></label>' for n in themes())
-    save = "" if ro else f'<input type=hidden name=csrf value="{csrf}"><button>Save</button>'
-    return (f"{NAV}<h2>Transitions</h2>{elsewhere(drawn_by) if drawn_by else ''}<p class=note>{html.escape(note)}</p>"
-            f"<p>Between pages, these take turns. Untick one to skip it.</p><form method=post action=/transitions>{boxes}{save}</form>")
+    save = "" if ro else f'<input type=hidden name=csrf value="{csrf}"><button>save</button>'
+    return (nav("/transitions") + (elsewhere(drawn_by) if drawn_by else "") + f"<p class=note>{html.escape(note)}</p>"
+            + look.panel("Transitions", f"<p>Between pages, these take turns. Untick one to skip it.</p>"
+                                        f"<form method=post action=/transitions class=go>{boxes}{save}</form>"))
 
 
 def location_page(csrf, note=""):
@@ -970,12 +981,12 @@ def location_page(csrf, note=""):
     now = next((e.get("options", {}) for e in takers if "lat" in e.get("options", {})), {})
     names = ", ".join(sorted({e["page"] for e in takers})) or "none of its pages"
     field = lambda k, label: (f'<label>{label}<input name={k} value="{html.escape(str(now.get(k, "")))}"'
-                              f'{" disabled" if ro else ""}></label>')
-    save = "" if ro else f'<input type=hidden name=csrf value="{csrf}"><button>Save</button>'
-    return (f"{NAV}<h2>Location</h2>{elsewhere(drawn_by) if drawn_by else ''}<p class=note>{html.escape(note)}</p>"
-            f"<p>Where it is, for {html.escape(names)}. A page with no location set uses its own default.</p>"
-            f"<form method=post action=/location>{field('lat', 'Latitude')}{field('lon', 'Longitude')}"
-            f"{field('place', 'Place, for the weather heading')}{save}</form>")
+                              f'{" inputmode=decimal" if k in ("lat", "lon") else ""}{" disabled" if ro else ""}></label>')
+    save = "" if ro else f'<input type=hidden name=csrf value="{csrf}"><button>save</button>'
+    return (nav("/location") + (elsewhere(drawn_by) if drawn_by else "") + f"<p class=note>{html.escape(note)}</p>"
+            + look.panel("Location", f"<p>Where it is, for {html.escape(names)}. A page with no location set uses its own default.</p>"
+                                     f"<form method=post action=/location class=go>{field('lat', 'Latitude')}{field('lon', 'Longitude')}"
+                                     f"{field('place', 'Place, for the weather heading')}{save}</form>"))
 
 
 PACKS_REQUEST, PACKS_STATUS = os.path.join(CONF, packs.REQUEST), os.path.join(CONF, packs.STATUS)
@@ -1037,9 +1048,9 @@ def install_page(csrf, note=""):
     status, mine = state["status"], state["packs"]
     form = lambda action, label, **hidden: "" if ro else (
         f'<form method=post action=/install class=inline><input type=hidden name=csrf value="{csrf}">'
-        f'<input type=hidden name=action value={action}>' +
+        f'<input type=hidden name=action value="{action}">' +
         "".join(f'<input type=hidden name={k} value="{html.escape(str(v))}">' for k, v in hidden.items()) +
-        f"<button>{label}</button></form>")
+        f'<button{" class=danger" if action == "remove" else ""}>{label}</button></form>')
     banner = ""
     if os.path.exists(PACKS_REQUEST) or status.get("state") == "working":
         banner = '<meta http-equiv=refresh content=5><p class=note>Working on it. This page checks again every few seconds.</p>'
@@ -1052,27 +1063,32 @@ def install_page(csrf, note=""):
             if entry.get("kind") != kind:
                 continue
             about = html.escape(entry.get("about", ""))[:160]
-            if name in have[folder]:
+            installed = name in have[folder]
+            if installed:
                 why = ("comes with every kiosk" if name in core_names[folder] else "in the playlist" if name in playing else "")
-                action = f"<small>Installed{', ' + why if why else ''}.</small>" + ("" if why else " " + form("remove", "Remove", kind=kind, name=name))
+                action = f"<small>Installed{', ' + why if why else ''}.</small>" + ("" if why else " " + form("remove", "remove", kind=kind, name=name))
             else:
-                action = form("catalog", "Install", kind=kind, name=name)
-            rows.append(f"<li><b>{html.escape(name)}</b> <small>{about}</small><br>{action}")
-        sections.append(f"<h2>{title} from the catalog</h2><ul>{''.join(rows)}</ul>")
+                action = form("catalog", "install", kind=kind, name=name)
+            rows.append(f"<li class='item bare {'on' if installed else 'off'}'><span class=name>{html.escape(name)}</span>"
+                        f"<span class=tag>{'INSTALLED' if installed else ''}</span><small>{about}</small>"
+                        f"<div class=actions>{action}</div>")
+        sections.append(look.panel(f"{title} from the catalog", f"<ul>{''.join(rows)}</ul>"))
     updates = status.get("updates") or {}
     repo_rows = "".join(
-        f"<li><b>{html.escape(n)}</b> <small>a {html.escape(p.get('kind', '?'))} from {html.escape(p.get('repo', '?'))} at "
-        f"{html.escape(p.get('commit', '')[:7])}</small><br>"
-        + (form("update", f"Update to {html.escape(updates[n][:7])}", name=n) if n in updates else "")
-        + form("remove", "Remove", kind=p.get("kind", "page"), name=n) for n, p in sorted(mine.items()))
-    repo_form = "" if ro else f"""<form method=post action=/install><input type=hidden name=csrf value="{csrf}">
+        f"<li class='item bare'><span class=name>{html.escape(n)}</span><span class=tag>INSTALLED</span><small>a "
+        f"{html.escape(p.get('kind', '?'))} from {html.escape(p.get('repo', '?'))} at {html.escape(p.get('commit', '')[:7])}"
+        f"</small><div class=actions>"
+        + (form("update", f"update to {html.escape(updates[n][:7])}", name=n) if n in updates else "")
+        + form("remove", "remove", kind=p.get("kind", "page"), name=n) + "</div>" for n, p in sorted(mine.items()))
+    repo_form = "" if ro else f"""<form method=post action=/install class=go><input type=hidden name=csrf value="{csrf}">
 <input type=hidden name=action value=repo><label>GitHub repo<input name=repo placeholder="https://github.com/someone/their-page"></label>
 <label>Branch, tag or commit (optional)<input name=ref placeholder="the default branch"></label>
 <label class=check><input type=checkbox name=agree value=on> I understand nobody has reviewed this code, and it runs on the kiosk
 with the kiosk's access: only install from someone you trust.</label><button>Install from the repo</button></form>"""
-    return (f"{NAV}<h2>Install</h2>{elsewhere(drawn_by) if drawn_by else ''}{banner}<p class=note>{html.escape(note)}</p>"
-            f"<p>Everything in the catalog has been reviewed. Installing restarts the display.</p>{''.join(sections)}"
-            f"<h2>From a repo</h2><ul>{repo_rows or '<li>Nothing yet.'}</ul>{form('check', 'Check for updates') if mine else ''}{repo_form}")
+    return (nav("/install") + (elsewhere(drawn_by) if drawn_by else "") + banner + f"<p class=note>{html.escape(note)}</p>"
+            + "<p>Everything in the catalog has been reviewed. Installing restarts the display.</p>" + "".join(sections)
+            + look.panel("From a repo", f"<ul>{repo_rows or '<li>Nothing yet.'}</ul>"
+                                        f"{form('check', 'check for updates') if mine else ''}{repo_form}"))
 
 
 SETTINGS = {"/pages": pages_page, "/transitions": transitions_page, "/location": location_page, "/install": install_page}
