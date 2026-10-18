@@ -15,8 +15,15 @@ from PIL import Image, ImageDraw, ImageFont
 import kit
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-SECONDS = 6   # 144 frames: the panels and the Premier in 0.8 s, his line to 3.6 s, SPACE!!!! and its hold, a shake, a 1.4 s launch
-LOOK_UP = .84  # how far through his talking he looks up (frame 8), then grins (9)
+# the story's beats, in seconds, budgeted for reading: his line is 11 words, about 3.5 s at an average reading speed,
+# so all of it stays up and still for 4 s before he looks up; SPACE!!!! holds about 1.3 s once it's formed
+BEATS = {"drop": .35, "rise": .5, "talk": 5.35, "shout": 1.55, "shake": .35, "launch": 1.4}
+SECONDS = sum(BEATS.values())   # 9.5 s, 228 frames; a render server's kiosk gives up after 20 s quiet (remote.py), so
+                                # a transition stays well under that
+LINE_GAP = .4  # seconds between the lines of his speech coming up
+STILL = 5.3    # seconds it holds still on purpose, to be read: his line (4) and SPACE!!!! (1.3); transitions.check()
+               # wants the rest moving
+LOOK_UP = .9   # how far through his talking he looks up (frame 8), then grins (9)
 RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 CREAM, NAVY, TEAL = (238, 226, 198), (20, 24, 40), (40, 150, 140)   # the poster's paper, its dark fields, its cool accent
 
@@ -254,6 +261,7 @@ def flame(size, seed):
 
 
 FLAMES = [flame((360, 260), s) for s in (1, 2, 3)]   # three, taking turns: it flickers
+FLAME_H = FLAMES[0]["h"]
 FLAME_X = FIG_X + FIG_W // 2 - 180
 
 
@@ -289,13 +297,16 @@ def ease_in(t):
 
 
 def frames(c, count):
-    """count frames (144 by default): the panels drop in, one then the other (0-6%), he rises (6-13%), says his line, a line of the bubble
-    at a time, both up in time to read before he looks up (13-60%), shouts SPACE!!!! (60-71%: the rays, the trail, the
-    word sliding up onto it, then a hold), the screen shakes (71-76%), and the whole scene blasts off the top on a flame,
-    the new page coming up from below (76-100%)"""
+    """count frames (228 by default), in BEATS: the panels drop in, one then the other; he rises; he says his line, a
+    line of the banner every LINE_GAP seconds, and all of it stays up 4 s before he looks up and grins; SPACE!!!! goes
+    off (the rays, the trail, the word sliding up onto it) and holds; the screen shakes; and the whole page blasts off
+    the top on its flame, the new page coming up from below. Times are shares of SECONDS, so any count keeps the shape."""
     n = max(1, count)
-    at = lambda f: round(f * n)
-    drop, rise, talk, shout_at, shake_end, launch = at(.06), at(.13), at(.6), at(.71), at(.76), n
+    at = lambda t: round(t / SECONDS * n)   # seconds -> frames
+    ends, t = [], 0
+    for beat in BEATS.values():
+        t += beat; ends.append(at(t))
+    drop, rise, talk, shout_at, shake_end, launch = ends[:5] + [n]
     scene, shown, easing, lifted = None, SPEAKING[0], False, 0
     for i in range(n):
         if i < drop:   # the panels drop down over the old page, his first, the other starting halfway through his
@@ -312,8 +323,8 @@ def frames(c, count):
         elif i < talk:   # he talks: each pose held about a quarter second at the usual length, spread so it always
                          # ends on the last one just before he looks up
             k = (i - rise) / max(1, talk - rise)
-            for line, part in enumerate(SPEECH):   # the bubble's first line as he starts, the rest by 40% in
-                if i == rise + round(line * .4 * (talk - rise) / max(1, len(SPEECH) - 1)):
+            for line, part in enumerate(SPEECH):   # the banner's lines, LINE_GAP apart from when he starts
+                if i == rise + at(line * LINE_GAP):
                     put(c, part)
             if k > LOOK_UP:   # he looks up, then grins at the sky
                 want = LOOKING[min(len(LOOKING) - 1, int((k - LOOK_UP) / (1 - LOOK_UP) * len(LOOKING)))]
@@ -337,14 +348,13 @@ def frames(c, count):
                     put(c, SHOUTING); put(c, SHOUT_STEPS[-1])
                 scene = bytes(c.cur)
             dy = (6, -6, 4, -4, 2, -2, 0)[(i - shout_at) % 7]
-            shake(c, scene, dy)
-            c.draw(FLAMES[i % len(FLAMES)], FLAME_X + (-6, 0, 6, 0)[i % 4], HEIGHT - 60 + abs(dy))
+            shake(c, scene, dy)   # no flame yet: it only ever shows below the page, never over him
         else:   # lift-off: the scene goes up, faster and faster, on its flame, and the new page comes up from below
             if scene is None:   # no shake at this length either
                 put(c, SHOUTING); put(c, SHOUT_STEPS[-1])
                 scene = bytes(c.cur)
             k = (i - shake_end + 1) / max(1, launch - shake_end)
-            lift = round(ease_in(k) * (HEIGHT + FLAMES[0]["h"]))   # far enough that the flame's tip is off the top too
+            lift = round(ease_in(k) * (HEIGHT + FLAME_H))   # far enough that the flame's tip is off the top too
             if i == shake_end:   # the last shake may have left it shifted: straight again before it goes
                 shake(c, scene, 0)
             c.reveal(0, max(0, HEIGHT - lift), WIDTH, lift - lifted)   # just the rows uncovered since last frame
@@ -365,7 +375,34 @@ def check():
     assert len({step[4] for step in SHOUT_STEPS}) == len(SHOUT_STEPS), "every step of the shout is a step"
     from .canvas import Canvas
     size = WIDTH * HEIGHT * 2
-    for count in (1, 2, 12, 144, 200):
+    from . import FPS
+    # reading time: all three lines up and still for 4 s before he looks up, and the shout formed for 1.2 s
+    assert BEATS["talk"] * LOOK_UP - LINE_GAP * (len(LINES) - 1) >= 4, "time to read his line"
+    assert BEATS["shout"] - len(SHOUT_STEPS) / FPS >= 1.2, "time to read SPACE!!!!"
+    assert STILL <= BEATS["talk"] * LOOK_UP - LINE_GAP * (len(LINES) - 1) + BEATS["shout"] - len(SHOUT_STEPS) / FPS, \
+        "STILL claims no more stillness than the reading holds have"
+    # the flame never lands on the poster in his panel's columns: every frame, drawn with and without it, may only
+    # differ there on rows the new page already shows
+    count, cols = round(SECONDS * FPS), slice(0, (P1[2] + 8) * 2)
+    def run():
+        c, got = Canvas(bytearray(size), b"\x55" * size), []
+        steps = frames(c, count)
+        while c.wipe() or next(steps, "done") != "done":
+            got.append(bytes(c.mm))
+        return got
+    lit, real = run(), FLAMES[:]
+    FLAMES[:] = [{"w": 1, "h": 1, "rows": [[]]}] * len(real)
+    try:
+        dark = run()
+    finally:
+        FLAMES[:] = real
+    new_row = b"\x55" * STRIDE
+    for k, (a, b) in enumerate(zip(lit, dark)):
+        for r in range(HEIGHT):
+            row = slice(r * STRIDE, (r + 1) * STRIDE)
+            if a[row][cols] != b[row][cols] and b[row] != new_row:
+                raise AssertionError(f"the flame is over his panel on frame {k}, row {r}")
+    for count in (1, 2, 12, 144, 228):
         c = Canvas(bytearray(size), b"\x55" * size)
         shown, steps = [], frames(c, count)
         while c.wipe() or next(steps, "done") != "done":   # as play() goes: this frame's decorations off, then the next
