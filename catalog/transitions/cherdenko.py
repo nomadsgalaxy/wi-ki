@@ -20,20 +20,21 @@ LOOK_UP = .84  # how far through his talking he looks up (frame 8), then grins (
 RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 
 # --- the Premier ----------------------------------------------------------------------------------------------------
-# Nula's pixel art of Premier Cherdenko: a 4x3 sheet of him speaking, and him looking up, mouth open,
-# shouting SPACE. Reduced to sprites in kiosk/art/: twelve frames 237x230 cut to one shared box so he doesn't jump between
-# them (cherdenko-talk.png, in a row), and the shout, 255x230 (cherdenko-space.png); stray edge pixels taken off, and 64
-# colours shared by both, and each frame shifted to line up on his shoulders, so his body doesn't hop. Drawn at 2x. The character is Red Alert 3's, played by Tim Curry: a fan tribute, for our kiosks.
+# Nula's pixel art of Premier Cherdenko: a 4x3 sheet of him speaking, ending with him looking up and grinning at the
+# sky. Reduced to sprites in kiosk/art/cherdenko-talk.png: twelve frames 237x230 in a row, cut to one shared box, stray
+# edge pixels taken off, 64 colours, and each frame shifted to line up on his shoulders, so his body doesn't hop. Drawn
+# at 2x. He shouts with the sheet's own last grin: Nula's separate shouting picture was drawn smaller and softer, and
+# didn't match. The character is Red Alert 3's, played by Tim Curry: a fan tribute, for our kiosks.
 TALK_ART = Image.open(os.path.join(kit.HERE, "art", "cherdenko-talk.png")).convert("RGBA")
-SHOUT_ART = Image.open(os.path.join(kit.HERE, "art", "cherdenko-space.png")).convert("RGBA")
 FRAME_W = 237
 TALK = [TALK_ART.crop((i * FRAME_W, 0, (i + 1) * FRAME_W, TALK_ART.height)) for i in range(TALK_ART.width // FRAME_W)]
 K = 2                                        # drawn at twice the art's size
-FIG_W, FIG_H = SHOUT_ART.width * K, TALK_ART.height * K   # the box both poses fit, his shoulders on the screen's bottom
+FIG_W, FIG_H = 255 * K, TALK_ART.height * K   # the box he's drawn in, a little wider than him, his shoulders on the
+                                              # screen's bottom
 FIG_X, FIG_Y = 250, HEIGHT - FIG_H
 SPEAKING = [11, 0, 1, 2, 3, 5, 6, 10, 4, 1, 7]   # the frames he talks through, in order: a smirk before he starts,
                                                  # ending on 7, his eyes already drifting up, so 7 -> 8 is never a jump back
-LOOKING = [8, 9]                             # then he looks up, and grins at the sky, before he shouts
+LOOKING = [8, 9]                             # then he looks up, and grins at the sky: the face he shouts with
 
 # --- the night, the bubble and the shout ----------------------------------------------------------------------------
 BUBBLE = (840, 34, 1886, 238)                # his speech bubble, top right, its tail to his mouth
@@ -106,7 +107,7 @@ POSES = {i: packed(img, FIG_X, FIG_Y) for i, img in SEEN.items()}
 ORDER = SPEAKING + LOOKING
 BLENDS = {(a, b): packed(Image.blend(SEEN[a], SEEN[b], .5), FIG_X, FIG_Y) for a, b in zip(ORDER, ORDER[1:])}
 # halfway between each pose and the next, shown for one frame as he changes, so his face eases rather than snaps
-SHOUTING = packed(pose(SHOUT_ART), FIG_X, FIG_Y)
+SHOUTING = POSES[LOOKING[-1]]   # the grin, drawn for good now, so it's in the scene that lifts off
 SPEECH = [region(lambda img, n=n: bubble(img, n), (TAIL[2][0] - 8, BUBBLE[1] - 8, BUBBLE[2] + 16, TAIL[2][1] + 8))
           for n in range(1, len(LINES) + 1)]
 SHOUT_BOX = (SHOUT_XY[0] - 4, SHOUT_XY[1] - 4, SHOUT_XY[0] + len(SHOUT) * 8 * SHOUT_K + 12, SHOUT_XY[1] + 16 * SHOUT_K + 12)
@@ -246,8 +247,8 @@ def frames(c, count):
 def check():
     """the art is there and the right size, and the story's beats come in order at any length"""
     assert len(TALK) == 12 and all(t.size == (FRAME_W, TALK_ART.height) for t in TALK), "twelve frames of him talking"
-    assert SHOUT_ART.height == TALK_ART.height and FIG_W >= TALK[0].width * K, "the shout fits the same box"
-    assert all(big_sprite(img, k) == sprite(img, k) for img, k in ((TALK[0], K), (TALK[3], 3), (SHOUT_ART, 1))), \
+    assert FIG_W >= TALK[0].width * K, "he fits his box"
+    assert all(big_sprite(img, k) == sprite(img, k) for img, k in ((TALK[0], K), (TALK[3], 3), (TALK[9], 1))), \
         "the runs are the engine's own, exactly"
     assert SHOUT_BOX[2] <= WIDTH and SHOUT_BOX[3] <= HEIGHT and BUBBLE[2] < WIDTH, "SPACE!!!! and the bubble fit"
     from .canvas import Canvas
