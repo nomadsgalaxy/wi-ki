@@ -4,7 +4,7 @@
  "home": "public",
  "about": "what a desktop's herdr workspaces are doing, and, if it has KodexBar, how much of each AI plan it's used. Needs the desk feed (feed/deskfeed.py) on that desktop: feed/README.md has the steps.",
  "found": {
-  "main": "4cb81a"
+  "main": "59784f"
  },
  "shapes": [
   "bar"
