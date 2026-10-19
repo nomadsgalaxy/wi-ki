@@ -57,7 +57,7 @@ NOT_PUBLIC = re.compile(r"op://|prusa|\b[a-z0-9-]+\.local\b|\b10\.\d+\.\d+\.\d+|
 HOST = re.compile(r"https?://([a-z0-9.-]+)|\b([a-z0-9-]+\.local)\b", re.I)
 ENGINE = {"__init__", "canvas"}   # the transitions' player and drawing, part of the core
 FRAMES = re.compile(r"^(def frames\(|frames = simple\()", re.M)
-FIXTURES = {"data", "planes", "w", "answer"}   # what a page's own check() hands it so it never fetches; never set in a playlist
+FIXTURES = {"data", "planes"}   # what a page's own check() hands it so it never fetches; never set in a playlist
 
 
 def git(repo, *args):
