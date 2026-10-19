@@ -2,7 +2,7 @@
 with their open PRs and issues and the five repos pushed to most recently, each with its last commit.
 
 The Pi can't see private repos, so the data comes from the desktop: feed/deskfeed.py asks GitHub with gh and pushes
-~/.cache/kiosk/desk.json here (kit.Feed). Until that arrives the page says it's waiting.
+~/.cache/kiosk/desk.json here, which it reads as its file (kit.Simple). Until that arrives the page says it's waiting.
 
 Options (in playlist.json): feed, the feed file (default ~/.cache/kiosk/desk.json).
 """
@@ -10,11 +10,12 @@ import json, os
 from datetime import datetime
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, O, W, G, D, A, BG, RULE, RAISED, Feed, local, masthead, text, packed
+from kit import SCREEN, O, W, G, D, A, BG, RULE, RAISED, Simple, fresh, note, local, masthead, text, packed
 
 COLUMNS, TOP, MARGIN = 3, 98, 16
 COL_W = (SCREEN[0] - 2 * MARGIN) // COLUMNS
 ROW = 70
+BLINK = [packed(Image.new("RGB", (16, 32), c)) for c in (O, BG)]
 
 
 def ago(when, now):
@@ -97,32 +98,6 @@ def draw(now, data, note=None):
     return img, (end + 10, 44)
 
 
-class Page:
-    """GitHub, as a page of the kiosk's cycle"""
-    name, seconds = "github", 20
-
-    def __init__(self, feed="~/.cache/kiosk/desk.json"):
-        self.feed, self.bg, self.cursor = Feed(feed), (None, None), (0, 0)
-        self.blink = [packed(Image.new("RGB", (16, 32), c)) for c in (O, BG)]
-
-    def active(self):
-        return self.feed.fresh()   # skipped while the desktop's away
-
-    def start(self, now):
-        pass   # background() reads the feed, and only when it changes
-
-    def background(self, now):
-        data = tidy(self.feed.load())
-        key = (now.minute, self.feed.mtime)   # the ages move on every minute
-        if key != self.bg[0]:
-            img, self.cursor = draw(now, data, self.feed.note(now) if data else ("waiting for the desktop", A))
-            self.bg = (key, packed(img))
-        return self.bg
-
-    def regions(self, now, t):
-        return [(self.blink[int(t * 2) % 2], self.cursor)]   # a blinking terminal cursor, so it's never quite still
-
-
 SAMPLE = {"updated": "2026-10-15T03:28:36+00:00", "github": {"error": None, "items": [
     {"owner": "Nomads Galaxy", "login": "nomadsgalaxy", "prs": 9, "issues": 3, "repos": [
         {"name": "desk-kiosk", "private": True, "pushed": "2026-10-15T03:23:14Z", "commit": "GitHub and agents pages"},
@@ -136,6 +111,26 @@ SAMPLE = {"updated": "2026-10-15T03:28:36+00:00", "github": {"error": None, "ite
         {"name": "printer-klipper-config-with-a-name-too-long", "private": False, "pushed": "2026-10-08T02:22:14Z",
          "commit": "Merge pull request #39"}]},
     {"owner": "Hive76", "login": "hive76", "prs": 0, "issues": 2, "repos": []}]}}
+
+
+class Page(Simple):
+    """GitHub, as a page of the kiosk's cycle"""
+    name, seconds, SAMPLE = "github", 20, SAMPLE
+
+    def __init__(self, feed="~/.cache/kiosk/desk.json"):
+        self.file, self.cursor = feed, (0, 0)
+
+    def active(self):
+        self.load()
+        return fresh(self.data)   # skipped while the desktop's away
+
+    def draw(self, img, now, data):
+        data = tidy(data)
+        picture, self.cursor = draw(now, data, note(data, now))
+        img.paste(picture)
+
+    def moving(self, now, t, data):
+        return [(BLINK[int(t * 2) % 2], self.cursor)]   # a blinking terminal cursor, so it's never quite still
 
 
 def check():
@@ -153,8 +148,9 @@ def check():
     assert tidy({"updated": SAMPLE["updated"], "github": {"items": {}}})["github"]["items"] == [], "an empty list draws"
     import tempfile
     path = os.path.join(tempfile.mkdtemp(), "desk.json")
+    Page.check()
     page = Page(feed=path)
-    assert page.background(now)[1].size == SCREEN and page.feed.note(now)[0] == "waiting for the desktop"
+    assert page.background(now)[1].size == SCREEN and page.data is None and note(None, now)[0] == "waiting for the desktop"
     assert not page.active(), "no feed: skipped"
     json.dump(dict(SAMPLE, updated=datetime.now().astimezone().isoformat()), open(path, "w"))
     assert page.active(), "a fresh feed: shown"
@@ -164,7 +160,7 @@ def check():
     assert bg.mode == "LA" and page.background(now)[0] == key, "redrawn only when something changes"
     open(path, "w").write("{half a fi")
     os.utime(path, (1, 1)); page.background(now)
-    assert page.feed.data == SAMPLE, "a broken file keeps the last good feed"
+    assert page.data == SAMPLE, "a broken file keeps the last good feed"
     assert page.regions(now, 0.0)[0][0].tobytes() != page.regions(now, 0.5)[0][0].tobytes(), "the cursor blinks"
     assert TOP + 60 + 5 * ROW - 18 <= SCREEN[1] - 8, "five repos fit"
 

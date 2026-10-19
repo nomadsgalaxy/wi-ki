@@ -5,7 +5,7 @@ Herdr's workspaces each get a row of pixel blocks, one per agent, coloured by st
 named. Plan usage comes from KodexBar's quota engine (kodexbar-quotas), the numbers its widget shows: every window with
 how full it is and when it resets. A desktop without KodexBar sends no usage, and herdr gets the whole page.
 
-Both come from the desktop, in ~/.cache/kiosk/desk.json (feed/deskfeed.py, read through kit.Feed).
+Both come from the desktop, in ~/.cache/kiosk/desk.json (feed/deskfeed.py), which it reads as its file (kit.Simple).
 
 Options (in playlist.json): feed, the feed file (default ~/.cache/kiosk/desk.json); plans, "auto" (the usage panel
 when the feed has usage) or "off" (herdr only, always).
@@ -14,9 +14,10 @@ import json, math, os
 from datetime import datetime
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, O, W, G, D, A, GREEN, BG, RULE, RAISED, ERROR, Feed, local, masthead, text, packed, level, meter
+from kit import SCREEN, O, W, G, D, A, GREEN, BG, RULE, RAISED, ERROR, Simple, fresh, note, local, masthead, text, packed, level, meter
 
 TOP, MARGIN, SPLIT = 98, 16, 720             # usage on the left, herdr on the right of SPLIT
+DARK = packed(Image.new("RGB", (12, 12), RAISED))   # a working agent's light, off
 BLOCKS, BLOCK = 20, 16                        # a usage bar is 20 pixel blocks, 5% each
 STATUS = {"working": O, "done": GREEN, "idle": D, "blocked": A, "waiting": A}
 ORDER = {"working": 0, "blocked": 1, "waiting": 1, "done": 2}
@@ -165,36 +166,6 @@ def draw_herdr(img, d, herdr, x0, y1):
     return blinking
 
 
-class Page:
-    """herdr's agents, and the plans' usage if the desktop has it, as a page of the kiosk's cycle"""
-    name, seconds = "agents", 20
-
-    def __init__(self, feed="~/.cache/kiosk/desk.json", plans="auto"):
-        self.feed, self.bg, self.blinking, self.plans = Feed(feed), (None, None), [], plans
-        self.dark = packed(Image.new("RGB", (12, 12), RAISED))
-
-    def active(self):
-        return self.feed.fresh()   # skipped while the desktop's away
-
-    def start(self, now):
-        pass   # background() reads the feed, and only when it changes
-
-    def background(self, now):
-        data = tidy(self.feed.load())
-        key = (now.minute, self.feed.mtime)   # the reset countdowns move on every minute
-        if key != self.bg[0]:
-            img, self.blinking = draw(now, data, self.feed.note(now) if data else ("waiting for the desktop", A), self.plans)
-            self.bg = (key, packed(img))
-            self.lit = [(self.bg[1].crop((x, y, x + 12, y + 12)), (x, y)) for x, y in self.blinking]
-        return self.bg
-
-    def regions(self, now, t):
-        """working agents blink; with none working, the page stands still"""
-        if int(t * 2) % 2:
-            return [(self.dark, xy) for xy in self.blinking]
-        return self.lit
-
-
 SAMPLE = {"updated": "2026-10-15T03:28:36+00:00",
           "usage": {"error": None, "items": [
               {"label": "Claude Personal", "error": None, "windows": [
@@ -216,6 +187,29 @@ SAMPLE = {"updated": "2026-10-15T03:28:36+00:00",
               {"label": "personal", "agents": [{"title": "Kiosk weather, GitHub and tokens", "status": "working", "agent": "claude"}]},
               {"label": "Home-Desktop", "agents": [{"title": "Solidcraft", "status": "blocked", "agent": "claude"}]},
               {"label": "empty", "agents": []}]}}
+
+
+class Page(Simple):
+    """herdr's agents, and the plans' usage if the desktop has it, as a page of the kiosk's cycle"""
+    name, seconds, SAMPLE = "agents", 20, SAMPLE
+
+    def __init__(self, feed="~/.cache/kiosk/desk.json", plans="auto"):
+        self.file, self.plans, self.lit = feed, plans, []
+
+    def active(self):
+        self.load()
+        return fresh(self.data)   # skipped while the desktop's away
+
+    def draw(self, img, now, data):
+        data = tidy(data)
+        picture, blinking = draw(now, data, note(data, now), self.plans)
+        img.paste(picture)
+        self.lit = [(packed(img.crop((x, y, x + 12, y + 12))), (x, y)) for x, y in blinking]
+
+    def moving(self, now, t, data):
+        """working agents blink; with none working, the page stands still"""
+        return [(DARK, xy) for _, xy in self.lit] if int(t * 2) % 2 else self.lit
+
 
 
 def check():
@@ -244,6 +238,7 @@ def check():
     assert min(x for x, _ in draw(now, SAMPLE)[1]) > SPLIT, "with it, herdr keeps to the right"
     import tempfile
     path = os.path.join(tempfile.mkdtemp(), "desk.json"); json.dump(SAMPLE, open(path, "w"))
+    Page.check()
     page = Page(feed=path)
     key, bg = page.background(now)
     assert bg.mode == "LA" and bg.size == SCREEN and page.background(now)[0] == key, "redrawn only when something changes"

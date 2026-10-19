@@ -19,7 +19,7 @@ import json, math, os
 from datetime import date, datetime, timedelta
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, O, W, G, C, BG, RULE, DIM, text, paste_icon, kind, warmth, packed
+from kit import SCREEN, O, W, G, C, BG, RULE, DIM, Simple, text, paste_icon, kind, warmth, packed
 
 DAYS, COLUMNS = 14, 7
 TOP, MARGIN = 72, 16
@@ -28,6 +28,7 @@ CELL_H = (SCREEN[1] - TOP - 8) // (DAYS // COLUMNS)
 CELL, WEEKEND = (20, 23, 31), (22, 30, 48)        # weekends are tinted blue, so they stand out as they come up
 WEEKEND_RULE, WEEKEND_TEXT = (52, 72, 112), (150, 190, 240)
 SHOWN = 2   # events a day has room for; more than that become "+N more"
+BLINK = [packed(Image.new("RGB", (16, 32), c)) for c in (O, BG)]
 
 
 def load_events(path):
@@ -141,34 +142,6 @@ def draw(now, events, forecast=None, title=None):
     return img
 
 
-class Page:
-    """the calendar, as a page of the kiosk's cycle"""
-    name, seconds = "calendar", 20
-
-    def __init__(self, events="~/.cache/kiosk/events.json", forecast="~/.cache/weather.json", title=None):
-        self.events, self.forecast, self.title = os.path.expanduser(events), os.path.expanduser(forecast), title
-        self.cursor = heading(title)[2]   # just after the heading
-        self.bg = (None, None)
-        self.blink = [packed(Image.new("RGB", (16, 32), c)) for c in (O, BG)]
-
-    def start(self, now):
-        pass   # everything is read in background(), and only when it changes
-
-    def background(self, now):
-        mtime = lambda p: os.path.getmtime(p) if os.path.exists(p) else 0
-        key = (now.date(), mtime(self.events), mtime(self.forecast))
-        if key != self.bg[0]:
-            try:
-                forecast = json.load(open(self.forecast))
-            except (OSError, ValueError):
-                forecast = None
-            self.bg = (key, packed(draw(now, load_events(self.events), forecast, self.title)))
-        return self.bg
-
-    def regions(self, now, t):
-        return [(self.blink[int(t * 2) % 2], self.cursor)]   # a blinking terminal cursor, so it's never quite still
-
-
 SAMPLE = {"updated": "2026-10-14T15:00:00", "events": [
     {"title": "Open House", "start": "2026-10-16T19:00", "end": "2026-10-16T22:00"},
     {"title": "3D Printing 101", "start": "2026-10-18T13:00", "end": "2026-10-18T15:00"},
@@ -180,6 +153,26 @@ SAMPLE = {"updated": "2026-10-14T15:00:00", "events": [
     {"title": "a broken entry with no start"}]}
 FORECAST = {"daily": {"time": [f"2026-10-{d}" for d in range(14, 28)], "weather_code": [0, 2, 3, 61, 95, 71, 45] * 2,
                       "temperature_2m_max": [21 - d for d in range(14)], "temperature_2m_min": [10 - d for d in range(14)]}}
+
+
+class Page(Simple):
+    """the calendar, as a page of the kiosk's cycle: events is its file, and the forecast is read with each drawing"""
+    name, seconds, SAMPLE = "calendar", 20, SAMPLE
+
+    def __init__(self, events="~/.cache/kiosk/events.json", forecast="~/.cache/weather.json", title=None):
+        self.file, self.forecast, self.title = events, os.path.expanduser(forecast), title
+        self.cursor = heading(title)[2]   # just after the heading
+
+    def draw(self, img, now, data):
+        try:
+            forecast = json.load(open(self.forecast))
+        except (OSError, ValueError):
+            forecast = None
+        img.paste(draw(now, events_from(data), forecast, self.title))
+
+    def moving(self, now, t, data):
+        return [(BLINK[int(t * 2) % 2], self.cursor)]   # a blinking terminal cursor, so it's never quite still
+
 
 
 def check():
@@ -199,6 +192,7 @@ def _check(folder):
     assert hour(datetime(2026, 1, 1, 19)) == "7p" and hour(datetime(2026, 1, 1, 9, 30)) == "9:30a"
     now = datetime(2026, 10, 14, 15, 0)
     assert draw(now, evs, FORECAST).size == SCREEN and draw(now, {}, None).size == SCREEN, "draws with or without data"
+    Page.check(events=events, forecast=forecast)
     page = Page(events=events, forecast=forecast)
     key, bg = page.background(now)
     assert bg.mode == "LA" and bg.size == SCREEN and page.background(now)[0] == key, "redrawn only when something changes"
