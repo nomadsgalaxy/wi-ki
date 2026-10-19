@@ -2,7 +2,8 @@
 """deskfeed: what the desk kiosk's github and agents pages show, gathered on my desktop, since the Pi can't see any of it.
 
 It collects four things and prints them as one JSON document:
-  github    the newest pushes, open PRs and issues for each owner in OWNERS (gh, so private repos count too)
+  github    the newest pushes, open PRs and issues for each owner in DESKFEED_OWNERS (gh, so private repos count too),
+            "login=Label,login,..." in the environment; unset, it's the account gh is logged in as and its first orgs
   usage     Claude Personal, Claude Work and Codex quota windows, from KodexBar's engine (kodexbar-quotas)
   herdr     my herdr workspaces and the agents running in each one (herdr api snapshot)
   calendar  the next DAYS days of events from the calendars the Event Calendar widget shows (Akonadi, through
@@ -15,10 +16,10 @@ over SSH, with a key that is only allowed to write ~/.cache/kiosk/desk.json (see
   deskfeed.py            print the feed
   deskfeed.py --check    self-test the parsing on sample data
 """
-import csv, io, json, os, shutil, sqlite3, subprocess, sys
+import csv, io, json, os, re, shutil, sqlite3, subprocess, sys
 from datetime import date, datetime, timedelta, timezone
 
-OWNERS = [("nomadsgalaxy", "Nomads Galaxy"), ("Positron3D", "Positron 3D"), ("hive76", "Hive76")]
+OWNERS = 3   # the github page's columns
 REPOS = 5
 WINDOWS = {300: "5h", 10080: "week"}
 DAYS = 14
@@ -29,9 +30,22 @@ def run(*cmd, timeout=120):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True).stdout
 
 
-def github_query():
+def owners(setting=None, ask=None):
+    """[(login, label)]: DESKFEED_OWNERS if it's set, else gh's own account and its orgs. A login goes into the GraphQL
+    query, so only GitHub's own characters get in"""
+    setting = os.environ.get("DESKFEED_OWNERS", "") if setting is None else setting
+    pairs = [(login.strip(), (label or login).strip()) for login, _, label in (o.partition("=") for o in setting.split(","))]
+    pairs = [(login, label) for login, label in pairs if re.fullmatch(r"[A-Za-z0-9-]{1,39}", login)]
+    if pairs or setting.strip():
+        return pairs[:OWNERS]
+    me = (ask or (lambda: json.loads(run("gh", "api", "graphql", "-f",
+          "query=query { viewer { login name organizations(first: 10) { nodes { login name } } } }"))["data"]))()["viewer"]
+    return [(o["login"], o.get("name") or o["login"]) for o in [me] + me["organizations"]["nodes"]][:OWNERS]
+
+
+def github_query(owners):
     parts = []
-    for i, (login, _) in enumerate(OWNERS):
+    for i, (login, _) in enumerate(owners):
         parts.append(f'''
   o{i}: repositoryOwner(login: "{login}") {{ repositories(first: {REPOS}, ownerAffiliations: OWNER,
         orderBy: {{field: PUSHED_AT, direction: DESC}}) {{ nodes {{ name isPrivate pushedAt
@@ -41,9 +55,9 @@ def github_query():
     return "query {" + "".join(parts) + "\n}"
 
 
-def github_parse(data):
+def github_parse(data, owners):
     out = []
-    for i, (login, label) in enumerate(OWNERS):
+    for i, (login, label) in enumerate(owners):
         repos = ((data.get(f"o{i}") or {}).get("repositories") or {}).get("nodes") or []
         out.append({"owner": label, "login": login, "prs": data[f"p{i}"]["issueCount"], "issues": data[f"i{i}"]["issueCount"],
                     "repos": [{"name": r["name"], "private": r["isPrivate"], "pushed": r["pushedAt"],
@@ -143,6 +157,10 @@ def ical_uids(data):
     return {line[4:].strip() for line in text.splitlines() if line.startswith("UID:")}
 
 
+def github(who):
+    return github_parse(json.loads(run("gh", "api", "graphql", "-f", f"query={github_query(who)}"))["data"], who)
+
+
 def section(fn):
     try:
         return {"items": fn(), "error": None}
@@ -155,7 +173,7 @@ def feed(have=shutil.which):
     error, so its page leaves that part out"""
     has = lambda tool, fn: section(fn) if have(tool) else None
     return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "github": has("gh", lambda: github_parse(json.loads(run("gh", "api", "graphql", "-f", f"query={github_query()}"))["data"])),
+            "github": has("gh", lambda: github(owners())),
             "usage": has("kodexbar-quotas", lambda: usage_parse(json.loads(run("kodexbar-quotas", "usage", "--provider", "enabled")))),
             "herdr": has("herdr", lambda: herdr_parse(json.loads(run("herdr", "api", "snapshot")))),
             "calendar": section(calendar)}
@@ -170,7 +188,13 @@ def check():
                                              "defaultBranchRef": None}]}},
           "p0": {"issueCount": 2}, "i0": {"issueCount": 5}, "o1": None, "p1": {"issueCount": 0}, "i1": {"issueCount": 0},
           "o2": {"repositories": {"nodes": []}}, "p2": {"issueCount": 1}, "i2": {"issueCount": 3}}
-    g = github_parse(gh)
+    three = [("nomadsgalaxy", "Nomads Galaxy"), ("Positron3D", "Positron 3D"), ("hive76", "Hive76")]
+    assert owners("nomadsgalaxy=Nomads Galaxy, Positron3D=Positron 3D,hive76=Hive76,more") == three
+    assert owners('x") { evil }, ok') == [("ok", "ok")] and owners(" , ") == [], "only GitHub's characters go in the query"
+    me = {"viewer": {"login": "me", "name": None, "organizations": {"nodes": [{"login": "a", "name": "A"}] * 3}}}
+    assert owners("", lambda: me) == [("me", "me"), ("a", "A"), ("a", "A")], "unset: the account and its first orgs"
+    assert 'user:hive76"' in github_query(three)
+    g = github_parse(gh, three)
     assert g[0]["repos"][0] == {"name": "desk-kiosk", "private": True, "pushed": "2026-10-15T03:23:14Z", "commit": "Celsius"}
     assert g[0]["repos"][1]["commit"] == "" and g[1]["repos"] == [] and g[2]["issues"] == 3, g
     u = usage_parse([

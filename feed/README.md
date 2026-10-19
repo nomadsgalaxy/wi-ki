@@ -14,6 +14,13 @@ It uses whichever of `gh` (logged in), `herdr` and `kodexbar-quotas` (KodexBar S
 own section: a tool that isn't installed sends nothing, and its page leaves that part out (without KodexBar, the
 agents page is all herdr). One that breaks still lets the others go out, and the page shows that section's error.
 
+The GitHub page shows three owners: the account `gh` is logged in as and its first two orgs. To pick them yourself,
+set `DESKFEED_OWNERS` to logins, each with the name to show after an `=` if you like, before running `install.sh`:
+
+```
+DESKFEED_OWNERS="nomadsgalaxy=Nomads Galaxy,Positron3D=Positron 3D,hive76=Hive76" feed/install.sh
+```
+
 ```
 feed/deskfeed.py            # print the feed
 feed/deskfeed.py --check    # self-test the parsing
