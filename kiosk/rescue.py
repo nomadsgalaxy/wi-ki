@@ -18,6 +18,9 @@ with nmcli. A machine without Wi-Fi (the render server) just sleeps.
 import html, json, os, secrets, socket, subprocess, sys, threading, time, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves our own folder off the path
+import look  # noqa: E402  the setup pages' one stylesheet
+
 STATUS = "/run/kiosk-rescue.json"        # what kiosk.py shows while the hotspot is up
 KEYFILES = "/etc/NetworkManager/system-connections"
 HOTSPOT, ADDRESS = "kiosk-rescue", "10.42.0.1"
@@ -78,15 +81,13 @@ def install(name, body):
     return path
 
 
-PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>{host}: Wi-Fi</title><style>body{{font:18px system-ui,sans-serif;max-width:32em;margin:2em auto;padding:0 1em;
-background:#0c0e14;color:#ebebeb}}input,select,button{{font:inherit;width:100%;padding:.6em;margin:.3em 0 1em;
-box-sizing:border-box;border-radius:8px;border:1px solid #445}}button{{background:#f6911f;color:#000;border:0}}
-p.note{{color:#f6911f}}</style><h1>{host}</h1><p>This kiosk lost its Wi-Fi. Pick a network and give its password, and it
-will drop this hotspot and join it. If it can't, this hotspot comes back in about a minute.</p>{note}
-<form method=post action=/join><label>Network<select name=ssid>{options}</select></label>
+PAGE = """<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>{host}: Wi-Fi</title><style>{css}</style><div class=term><header><h1>WI-KI WI-FI</h1><span>{host}</span></header><main>
+<fieldset><legend>Join a network</legend><p>This kiosk lost its Wi-Fi. Pick a network and give its password, and it will
+drop this hotspot and join it. If it can't, this hotspot comes back in about a minute.</p>{note}
+<form method=post action=/join class=go><label>Network<select name=ssid>{options}</select></label>
 <label>Or type its name<input name=other placeholder="a hidden network"></label>
-<label>Password<input name=password type=password autocomplete=off></label><button>Join</button></form>"""
+<label>Password<input name=password type=password autocomplete=off></label><button>Join</button></form></fieldset></main></div>"""
 
 
 class Rescue:
@@ -98,7 +99,8 @@ class Rescue:
         options = "".join(f"<option value='{html.escape(s, True)}'>{html.escape(s)} ({sig}%{', open' if not sec else ''})</option>"
                           for s, sig, sec in self.seen)
         note = f"<p class=note>{html.escape(self.note)}</p>" if self.note else ""
-        return PAGE.format(host=html.escape(self.host), options=options or "<option value=''>(none seen)</option>", note=note)
+        return PAGE.format(host=html.escape(self.host), options=options or "<option value=''>(none seen)</option>", note=note,
+                           css=look.CSS)
 
     def serve(self):
         rescue = self

@@ -27,6 +27,24 @@
    701
   ]
  },
+ "form": {
+  "geo": {
+   "type": "number",
+   "label": "Region (a GeoNames ID)",
+   "min": 1,
+   "max": 99999999,
+   "whole": true
+  },
+  "name": {
+   "type": "text",
+   "label": "Region's name, for the heading",
+   "max": 24,
+   "upper": true
+  },
+  "asns": {
+   "type": "internal"
+  }
+ },
  "ask": [
   "a Cloudflare API token with Radar Read"
  ],

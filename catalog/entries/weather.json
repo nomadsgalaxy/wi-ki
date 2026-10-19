@@ -25,6 +25,59 @@
   "units": null,
   "secondary": false
  },
+ "form": {
+  "lat": {
+   "type": "number",
+   "label": "Latitude",
+   "min": -90,
+   "max": 90
+  },
+  "lon": {
+   "type": "number",
+   "label": "Longitude",
+   "min": -180,
+   "max": 180
+  },
+  "place": {
+   "type": "text",
+   "label": "Place, for the heading",
+   "max": 24,
+   "upper": true
+  },
+  "units": {
+   "type": "choice",
+   "label": "Units",
+   "of": [
+    [
+     "",
+     "the place's own"
+    ],
+    [
+     "f",
+     "°F"
+    ],
+    [
+     "c",
+     "°C"
+    ]
+   ]
+  },
+  "secondary": {
+   "type": "bool",
+   "label": "Show the other unit too, small"
+  },
+  "landscape": {
+   "type": "choice",
+   "label": "Landscape",
+   "from": "landscapes",
+   "of": [
+    [
+     "",
+     "Philadelphia's skyline"
+    ]
+   ]
+  }
+ },
  "ask": [],
  "licence": {
   "code": "MIT",

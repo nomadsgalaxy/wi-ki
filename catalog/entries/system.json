@@ -18,6 +18,11 @@
  "settings": {
   "file": "/dev/shm/kiosk-system.json"
  },
+ "form": {
+  "file": {
+   "type": "internal"
+  }
+ },
  "ask": [
   "file"
  ],

@@ -18,6 +18,12 @@
  "settings": {
   "won": "1975-05-27"
  },
+ "form": {
+  "won": {
+   "type": "date",
+   "label": "Their last Cup"
+  }
+ },
  "ask": [],
  "licence": {
   "code": "MIT",

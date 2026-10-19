@@ -20,6 +20,20 @@
   "forecast": "~/.cache/weather.json",
   "title": "HIVE76"
  },
+ "form": {
+  "title": {
+   "type": "text",
+   "label": "Heading",
+   "max": 24,
+   "upper": true
+  },
+  "events": {
+   "type": "internal"
+  },
+  "forecast": {
+   "type": "internal"
+  }
+ },
  "ask": [],
  "licence": {
   "code": "MIT",
