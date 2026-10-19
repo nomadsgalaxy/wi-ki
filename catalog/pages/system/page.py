@@ -7,7 +7,7 @@ The desktop's feed/sysfeed.py streams a sample every 2 seconds through sink.py, 
 
 Options (in playlist.json): file, where the sink writes (default /dev/shm/kiosk-system.json).
 """
-import json, os, time
+import json, math, os, time
 from datetime import datetime
 from PIL import Image, ImageDraw
 
@@ -29,6 +29,44 @@ def rate(b):
 def since(seconds):
     d, h, m = int(seconds // 86400), int(seconds % 86400 // 3600), int(seconds % 3600 // 60)
     return f"{d}d {h}h" if d else f"{h}h {m}m"
+
+
+def number(v, hi, default=0):
+    """v as a number between 0 and hi, or default if it isn't one (a numeric string counts, NaN and infinity don't)"""
+    try:
+        v = v if isinstance(v, (int, float)) else float(v)
+    except (TypeError, ValueError):
+        return default
+    return default if isinstance(v, bool) or not math.isfinite(v) else max(0, min(hi, v))
+
+
+def series(v):
+    """a list as percentages, leaving out what isn't a number"""
+    v = [number(x, 100, None) for x in v] if isinstance(v, list) else []
+    return [x for x in v if x is not None]
+
+
+def clean(raw):
+    """a sample as the page draws it: every number a number in range, every list of numbers, every text a string, or
+    None (the waiting page) if it isn't a sample at all. Missing numbers are 0, and missing temperatures stay None."""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    string = lambda k, n: raw[k][:n] if isinstance(raw.get(k), str) else ""
+    num = lambda k, hi=1e9, default=0: number(raw.get(k), hi, default)
+    s = {"host": string("host", 30) or "THE DESKTOP", "model": string("model", 40), "iface": string("iface", 16),
+         "cpu": num("cpu", 100), "load": num("load", 9999), "uptime": num("uptime", 1e10),
+         "cpu_temp": num("cpu_temp", 200, None), "disk_temp": num("disk_temp", 200, None),
+         "rx": num("rx", 1e13), "tx": num("tx", 1e13), "threads": series(raw.get("threads"))[:48],
+         "cpu_hist": series(raw.get("cpu_hist"))[-60:], "gpu_hist": series(raw.get("gpu_hist"))[-60:], "gpu": None}
+    for k, default in (("mem_used", 0), ("mem_total", 1), ("swap_used", 0), ("swap_total", 0), ("disk_used", 0), ("disk_total", 1)):
+        s[k] = num(k, 1e7, default)
+    g = raw.get("gpu")
+    if isinstance(g, dict):
+        gn = lambda k, hi, default=0: number(g.get(k), hi, default)
+        s["gpu"] = {"name": str(g["name"])[:34] if isinstance(g.get("name"), str) else "", "util": gn("util", 100),
+                    "temp": gn("temp", 200), "power": gn("power", 9999), "vram_used": gn("vram_used", 1e5),
+                    "vram_total": gn("vram_total", 1e5, 1) or 1}
+    return s
 
 
 def graph(d, x, y, w, h, hist, samples=60):
@@ -154,7 +192,7 @@ class Page:
         key = (mtime, now.minute, stale)
         if key != self.bg[0]:
             try:
-                self.data = json.load(open(self.file)) if mtime else None
+                self.data = clean(json.load(open(self.file))) if mtime else None
             except (OSError, ValueError):
                 pass   # half written: keep the last sample
             note = ("waiting for the desktop", A) if not self.data else \
@@ -179,10 +217,13 @@ def check():
     from . import sink
     sink.check()
     assert rate(512) == "512 B/s" and rate(18505) == "18.5 KB/s" and rate(1234567) == "1.2 MB/s" and rate(123e6) == "123 MB/s"
+    assert clean([1]) is None and clean({}) is None and clean({"cpu": "12", "threads": [5, None, "x", 400]})["threads"] == [5, 100]
+    assert clean({"cpu": "12", "gpu": {"util": None}})["cpu"] == 12 and clean({"cpu_temp": float("nan")})["cpu_temp"] is None
+    assert clean(dict(SAMPLE, gpu=[], cpu_hist={}, host=7, mem_used=-3))["host"] == "THE DESKTOP" and clean(SAMPLE)["cpu_hist"] == SAMPLE["cpu_hist"]
     assert since(517777) == "5d 23h" and since(3700) == "1h 1m"
     now = datetime(2026, 10, 15, 0, 30)
     broken = dict(SAMPLE, gpu=None, threads=[], cpu="x", swap_total=0, cpu_hist=None)
-    for s in (SAMPLE, None, broken, {"host": "x"}):
+    for s in (SAMPLE, None, broken, {"host": "x"}, clean({"cpu": None, "gpu": {}, "host": "ß" * 99, "rx": "9"})):
         assert draw(now, s).size == SCREEN, "draws with, without and with broken data"
     path = os.path.join(tempfile.mkdtemp(), "system.json")
     page = Page(path)

@@ -195,16 +195,35 @@ def helicopter(track, colour):
     return img.rotate(-round((track or 0) / 45) * 45, Image.NEAREST)
 
 
+def number(v, low, high):
+    """v as a number between low and high, or None if it isn't one"""
+    try:
+        return max(low, min(high, float(v))) if math.isfinite(float(v)) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def aircraft(raw):
     """adsb.lol's (or adsb.fi's) list -> [{callsign, type, reg, alt, speed, track, dist (nm), bearing, heli}], nearest first. heli is
-    the ADS-B emitter category A7, rotorcraft"""
+    the ADS-B emitter category A7, rotorcraft. A plane with no distance or bearing is left out, and the rest are made
+    to fit: a callsign and type of text, an altitude in feet or "ground", a speed, a track or None, in range. Whatever isn't a
+    list is no data yet (None)."""
+    if not isinstance(raw, list):
+        return None
     out = []
     for a in raw:
-        if a.get("dst") is None or a.get("dir") is None:
+        if not isinstance(a, dict):
             continue
-        out.append({"callsign": (a.get("flight") or a.get("r") or a.get("hex", "?")).strip(), "type": a.get("t", ""),
-                    "reg": a.get("r", ""), "alt": a.get("alt_baro", 0), "speed": a.get("gs") or 0,
-                    "track": a.get("track"), "dist": a["dst"], "bearing": a["dir"], "heli": a.get("category") == "A7"})
+        dist, bearing = number(a.get("dst", a.get("dist")), 0, 5000), number(a.get("dir", a.get("bearing")), -1e6, 1e6)
+        if dist is None or bearing is None:
+            continue
+        alt, track = a.get("alt_baro", a.get("alt")), number(a.get("track"), -1e6, 1e6)
+        out.append({"callsign": (str(a.get("flight") or a.get("callsign") or a.get("r") or a.get("hex") or "?").strip() or "?")[:8],
+                    "type": str(a.get("t") or a.get("type") or "")[:4], "reg": str(a.get("r") or a.get("reg") or "")[:12],
+                    "alt": "ground" if alt == "ground" else round(number(alt, -2000, 100000) or 0),
+                    "speed": number(a.get("gs", a.get("speed")), 0, 3000) or 0,
+                    "track": None if track is None else track % 360, "dist": dist, "bearing": bearing % 360,
+                    "heli": a.get("category") == "A7" or a.get("heli") is True})
     return sorted(out, key=lambda p: p["dist"])
 
 
@@ -275,16 +294,27 @@ def draw(now, planes, routes, radius, note=None, base=None):
     return img
 
 
+def route_of(r):
+    """adsbdb's flight route -> {from, to, airline}, or {} unless both ends are airport codes (some come back without)"""
+    ends = [(r.get(k) or {}).get("iata_code") if isinstance(r, dict) and isinstance(r.get(k), dict) else None
+            for k in ("origin", "destination")]
+    if not all(isinstance(c, str) and 2 <= len(c) <= 4 for c in ends):
+        return {}
+    airline = (r.get("airline") or {}).get("name") if isinstance(r.get("airline"), dict) else None
+    return {"from": ends[0], "to": ends[1], "airline": airline[:40] if isinstance(airline, str) else None}
+
+
 class Page:
     """the radar, as a page of the kiosk's cycle"""
     name, seconds, shapes = "radar", 20, ("bar", "16-9", "9-16")
 
     def __init__(self, lat=39.95, lon=-75.17, radius=25, planes=None):
         self.lat, self.lon, self.radius = lat, lon, radius
+        fixed, planes = planes is not None, aircraft(planes)   # a test's planes are cleaned like a feed's
         self.planes, self.routes, self.fetched, self.error = planes, {}, (time.time() if planes else 0), None
         self.seen, self.wait = None, 0.0   # when a feed last answered (the planes fly on from there); no fetch till wait
         self.down, self.source = {}, FEEDS[0][0]   # feed -> left alone until; the one that answered last
-        self.fixed, self.busy, self.bg = planes is not None, False, (None, None)
+        self.fixed, self.busy, self.bg = fixed, False, (None, None)
         self.base, self.mapped = basemap(None, lat, lon, radius), 0.0   # the street map comes in the background
         self.rain, self.rained = None, 0.0
 
@@ -295,9 +325,7 @@ class Page:
             self.fetched = self.seen = time.time(); self.error = None
             for p in [p for p in self.planes if p["callsign"] not in self.routes][:ROUTES_PER_FETCH]:
                 try:
-                    r = get(f"https://api.adsbdb.com/v0/callsign/{p['callsign']}")["response"]["flightroute"]
-                    self.routes[p["callsign"]] = {"from": r["origin"]["iata_code"], "to": r["destination"]["iata_code"],
-                                                  "airline": (r.get("airline") or {}).get("name")}
+                    self.routes[p["callsign"]] = route_of(get(f"https://api.adsbdb.com/v0/callsign/{p['callsign']}")["response"]["flightroute"])
                 except urllib.error.HTTPError as e:
                     if e.code == 404:   # private flights and the like have none: don't ask again
                         self.routes[p["callsign"]] = {}
@@ -372,6 +400,9 @@ ROUTES = {"AAL322": {"from": "MIA", "to": "EWR", "airline": "American Airlines"}
 
 
 def check():
+    assert route_of({"origin": {"iata_code": "MIA"}, "destination": {"iata_code": "EWR"}, "airline": {"name": "American Airlines"}}) \
+        == ROUTES["AAL322"] and route_of({"origin": {"iata_code": "MIA"}, "destination": {"iata_code": None}}) == {} \
+        and route_of(None) == {} and route_of({"origin": "MIA"}) == {}, "a route only when both ends are airport codes"
     assert [p["callsign"] for p in SAMPLE] == ["AAL322", "SKQ51", "GTI8865", "N139MH", "ICE686"], "nearest first, no position no blip"
     town = {"places": [["Wilmington", "city", 70000, 39.74, -75.55]], "airports": [["ILG", "Wilmington Airport", 39.6787, -75.6065]]}
     assert [l[2] for l in basemap(town, 39.71, -75.62, 25)[1]] == ["ILG", "Wilmington"], "airports first, then towns"
@@ -426,6 +457,15 @@ def check():
     now = datetime(2026, 10, 15, 0, 50)
     for planes in (SAMPLE, [], None):
         assert draw(now, planes, ROUTES, 25).size == SCREEN, "draws with planes, an empty sky, and nothing yet"
+    # odd data is cleaned before it's drawn: a plane with no bearing is left out, wrong types and huge numbers are made to fit
+    odd = aircraft([{"flight": None, "dst": "12", "dir": 400, "alt_baro": "x", "gs": 1e9, "track": "90", "t": "Ωμέγα" * 9}, {"dst": 3}, {"dst": 1e12, "dir": 0}, 7])
+    assert len(odd) == 2 and odd[1]["dist"] == 5000 and odd[0]["bearing"] == 40 and odd[0]["alt"] == 0 and odd[0]["speed"] == 3000 and odd[0]["track"] == 90 and len(odd[0]["type"]) == 4, odd
+    assert aircraft(SAMPLE) == SAMPLE, "good data comes through as it was"
+    assert aircraft(None) is None and aircraft("x") is None and aircraft({}) is None and aircraft([]) == []
+    for planes in (odd, [], None):
+        assert draw(now, planes, ROUTES, 25).size == SCREEN
+        assert Page(planes=planes).background(now)[1].size == SCREEN
+    assert Page(planes="x").fixed and Page(planes="x").planes is None, "data that isn't a list is no data yet, and isn't fetched over"
     page = Page(planes=SAMPLE); page.routes = ROUTES
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key, "redrawn only when the data or minute changes"

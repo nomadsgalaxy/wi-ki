@@ -167,7 +167,56 @@ def spot(p):
         a, b = float(p["lat"]), float(p["lon"])
     except (KeyError, TypeError, ValueError):
         return None
-    return (a, b) if math.isfinite(a) and math.isfinite(b) else None
+    return (a, b) if abs(a) <= 90 and abs(b) <= 180 else None   # not NaN, and on the globe
+
+
+def whole(n, top=9999):
+    """n as a whole number from 0 to top, or None if it isn't a number"""
+    try:
+        return max(0, min(top, round(float(n)))) if math.isfinite(float(n)) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def words(v, n=80):
+    """v as text, cut at n characters; "" for None"""
+    return "" if v is None else str(v)[:n]
+
+
+def clean_city(c):
+    """the city's cache in the shape draw wants, whatever came in: None unless it has reports and permits lists, a
+    row with no readable time left out, a row's place None if it has none"""
+    if not isinstance(c, dict) or not all(isinstance(c.get(k), list) for k in ("reports", "permits")):
+        return None
+    out = {"fetched": c.get("fetched")}
+    for key, fields in (("reports", ("service_name", "status", "address")), ("permits", ("permittype", "typeofwork", "address"))):
+        out[key] = []
+        for r in c[key]:
+            if not isinstance(r, dict):
+                continue
+            try:
+                when(str(r.get("t")), datetime(2026, 1, 1))
+            except (ValueError, OverflowError, TypeError):
+                continue   # a row with no time can't be listed
+            a, b = spot(r) or (None, None)
+            out[key].append({**{f: words(r.get(f)) for f in fields}, "t": str(r["t"]), "lat": a, "lon": b})
+    return out
+
+
+def clean_bikes(b):
+    """the bikes' cache in the shape draw wants: None unless it has a stations list, a station with no name or place
+    left out, its counts whole numbers or None"""
+    if not isinstance(b, dict) or not isinstance(b.get("stations"), list):
+        return None
+    out = []
+    for s in b["stations"]:
+        p = spot(s) if isinstance(s, dict) else None
+        if p and s.get("name") is not None:
+            far = whole(s.get("far"), 10 ** 6)
+            out.append({"name": words(s["name"]), "lat": p[0], "lon": p[1], "far": 0 if far is None else far,
+                        **{k: whole(s.get(k)) for k in ("bikes", "ebikes", "docks")},
+                        "open": s["open"] if isinstance(s.get("open"), bool) else None})
+    return {"stations": out, "fetched": b.get("fetched")}
 
 
 def hexagon(d, x, y, r, fill, outline):
@@ -351,7 +400,9 @@ class Page:
         self.where = {"place": str(place).upper()[:16], "area": str(area or "")[:24], "city": city,
                       "bike_share": str(bike_share).upper()[:16] if bikes else ""}
         self.fixed = data is not None
-        self.streets, self.city, self.bikes = (data or {}).get("streets"), (data or {}).get("city"), (data or {}).get("bikes")
+        data = data if isinstance(data, dict) else {}
+        self.streets = data.get("streets") if streets_ok(data.get("streets")) else None
+        self.city, self.bikes = clean_city(data.get("city")), clean_bikes(data.get("bikes"))
         self.busy, self.touched, self.bg, self.tried = False, 0.0, (None, None), {}
         self.paths = ()   # the two caches, set when first used: they depend on lat, lon and radius, and the tests swap CACHE and BIKES
 
@@ -412,6 +463,7 @@ class Page:
                 self.busy = True; threading.Thread(target=self.fetch, daemon=True).start()
             self.city, city_t = read(city_path)
             self.bikes, bikes_t = read(bikes_path)
+            self.city, self.bikes = clean_city(self.city), clean_bikes(self.bikes)
         else:
             city_t = bikes_t = 0
         if self.view != self.home and time.time() - self.touched > IDLE:   # nobody's touched it for a while
@@ -459,6 +511,19 @@ def check():
     for view, _ in VIEWS:
         assert draw(now, view, *HIVE76, 1000, SAMPLE["streets"], holes, SAMPLE["bikes"]).size == SCREEN, f"{view} with holes"
     assert spot({"lat": None, "lon": 1}) is None and spot({"lat": "x", "lon": 1}) is None and spot({"lat": 1, "lon": 2}) == (1, 2)
+    # odd data is cleaned before it's drawn: wrong types, missing fields, huge numbers, empty lists, text of any length
+    odd = {"city": {"reports": [{"service_name": None, "t": "2026-10-15T15:00:00Z", "lat": "x", "lon": 1e9}, {"t": 12}, "x"] + SAMPLE["city"]["reports"],
+                    "permits": []},
+           "bikes": {"stations": [{"name": "Ω" * 300, "lat": 1e9, "lon": 0}, {"name": "far", "lat": "39.98", "lon": -75.13, "bikes": "12", "docks": 10 ** 9, "open": 1},
+                                  {"lat": 1, "lon": 2}]}}
+    assert clean_city({"reports": 1, "permits": []}) is None and clean_bikes([]) is None and clean_city(None) is None
+    assert [r["service_name"] for r in clean_city(odd["city"])["reports"]] == ["", "Abandoned Vehicle", "Sanitation Violation"]
+    assert clean_city(SAMPLE["city"]) == dict(SAMPLE["city"]) and clean_bikes(SAMPLE["bikes"]) == SAMPLE["bikes"], "good data comes through as it was"
+    st = clean_bikes(odd["bikes"])["stations"]
+    assert len(st) == 1 and (st[0]["bikes"], st[0]["docks"], st[0]["ebikes"], st[0]["open"]) == (12, 9999, None, None)
+    for view, _ in VIEWS:
+        assert Page(view=view, data=odd).background(now)[1].size == SCREEN, f"{view} with odd data"
+        assert Page(view=view, data=[]).background(now)[1].size == SCREEN, f"{view} with data that isn't a dict"
     # the age: updated hh:mm, then amber when old
     fresh, old = (draw(now, "all", *HIVE76, 1000, None, SAMPLE["city"], SAMPLE["bikes"]),
                   draw(now, "all", *HIVE76, 1000, None, dict(SAMPLE["city"], fetched="2026-10-15T09:00:00"), SAMPLE["bikes"]))

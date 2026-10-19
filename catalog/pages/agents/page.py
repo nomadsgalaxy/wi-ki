@@ -9,7 +9,7 @@ Both come from my desktop, in ~/.cache/kiosk/desk.json (feed/deskfeed.py, read t
 
 Options (in playlist.json): feed, the feed file (default ~/.cache/kiosk/desk.json).
 """
-import json, os
+import json, math, os
 from datetime import datetime
 from PIL import Image, ImageDraw
 
@@ -34,6 +34,52 @@ def resets(when, now):
     return when.strftime("%a ") + when.strftime("%I").lstrip("0") + ("a" if when.hour < 12 else "p")
 
 
+def text_of(v, n):
+    """v if it's a string, cut to n characters, else empty"""
+    return v[:n] if isinstance(v, str) else ""
+
+
+def when_of(v):
+    """v if it's an ISO time the page can read, else None"""
+    try:
+        local(v)
+        return v
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def tidy(data):
+    """the feed as the page draws it: types coerced, missing fields filled in, unusable items dropped. A feed that isn't
+    a dict or has no readable 'updated' comes back as None, the page's 'waiting for the desktop'."""
+    if not isinstance(data, dict) or not when_of(data.get("updated")):
+        return None
+    out = {"updated": data["updated"]}
+    for key, inner in (("usage", "windows"), ("herdr", "agents")):
+        part = data.get(key) if isinstance(data.get(key), dict) else {}
+        items = []
+        for item in part.get("items") if isinstance(part.get("items"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            rows = []
+            for row in item.get(inner) if isinstance(item.get(inner), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                if key == "usage":
+                    try:
+                        used = float(row.get("used"))
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(used):
+                        rows.append({"name": text_of(row.get("name"), 6), "used": max(0, min(100, used)),
+                                     "resets": when_of(row.get("resets"))})
+                else:
+                    rows.append({"title": text_of(row.get("title"), 80), "status": text_of(row.get("status"), 12)})
+            items.append({"label": text_of(item.get("label"), 30), inner: rows,
+                          **({"error": text_of(item.get("error"), 80)} if key == "usage" else {})})
+        out[key] = {"error": text_of(part.get("error"), 110), "items": items}
+    return out
+
+
 def draw(now, data, note=None):
     """the whole page, 1920x515 RGB; returns it and the working agents' blocks [(x, y)], which blink"""
     img = Image.new("RGB", SCREEN, BG); d = ImageDraw.Draw(img)
@@ -56,6 +102,8 @@ def draw(now, data, note=None):
         if plan.get("error"):
             text(img, (x0 + 30, y), str(plan["error"])[:76], A, scale=1); y += 26
         for w in plan["windows"]:
+            if y + 26 > y1:
+                break
             used = max(0, min(100, w["used"]))
             text(img, (x0 + 30, y), w["name"][:6], G, scale=1)
             bx = x0 + 90 + meter(d, (x0 + 90, y), used, BLOCKS, BLOCK) + 8
@@ -75,6 +123,8 @@ def draw(now, data, note=None):
         tally[a["status"]] = tally.get(a["status"], 0) + 1
     x = x1 - 14
     for status, n in sorted(tally.items(), key=lambda kv: -ORDER.get(kv[0], 3)):   # right to left, working ends up first
+        if x - len(f"{n} {status}") * 8 < x0 + 14 + 5 * 16 + 24:   # no further than HERDR: the rarest are left out
+            break
         x -= text(img, (x, TOP + 18), f"{n} {status}", STATUS.get(status, G), scale=1, right=True) + 24
     if herdr.get("error"):
         text(img, (x0 + 14, TOP + 50), herdr["error"][:110], A, scale=1)
@@ -115,10 +165,10 @@ class Page:
         pass   # background() reads the feed, and only when it changes
 
     def background(self, now):
-        data = self.feed.load()
+        data = tidy(self.feed.load())
         key = (now.minute, self.feed.mtime)   # the reset countdowns move on every minute
         if key != self.bg[0]:
-            img, self.blinking = draw(now, data, self.feed.note(now))
+            img, self.blinking = draw(now, data, self.feed.note(now) if data else ("waiting for the desktop", A))
             self.bg = (key, packed(img))
             self.lit = [(self.bg[1].crop((x, y, x + 12, y + 12)), (x, y)) for x, y in self.blinking]
         return self.bg
@@ -164,6 +214,13 @@ def check():
                                 "herdr": {"error": "herdr: no server", "items": []}}):
         img, blinking = draw(now, data)
         assert img.size == SCREEN, "draws with, without and with broken data"
+    assert tidy(SAMPLE)["usage"]["items"][1]["windows"][2] == {"name": "Fable", "used": 91.0, "resets": "2026-10-18T01:00:00+00:00"}
+    assert tidy(None) is None and tidy({"usage": {}}) is None and tidy({"updated": "soon"}) is None, "no readable feed: waiting"
+    odd = tidy({"updated": SAMPLE["updated"], "usage": {"items": [{"label": 7, "windows": [{"name": "5h", "used": "12"}, {"used": None}, 3]}, "x"]},
+                "herdr": {"items": [{"label": "w", "agents": [{"title": None}, None]}], "error": 4}})
+    assert odd["usage"]["items"][0]["windows"] == [{"name": "5h", "used": 12.0, "resets": None}], "a number as text is read, a missing one dropped"
+    assert odd["herdr"]["items"][0]["agents"] == [{"title": "", "status": ""}] and odd["herdr"]["error"] == "", "missing fields get defaults"
+    assert draw(now, odd)[0].size == SCREEN and draw(now, tidy({"updated": SAMPLE["updated"], "herdr": []}))[0].size == SCREEN
     assert len(draw(now, SAMPLE)[1]) == 3, "each working agent blinks"
     import tempfile
     path = os.path.join(tempfile.mkdtemp(), "desk.json"); json.dump(SAMPLE, open(path, "w"))
