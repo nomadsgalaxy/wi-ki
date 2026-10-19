@@ -4,9 +4,9 @@ A Pi Zero is slow at drawing but quick at copying. A render server draws a kiosk
 which just puts them on its screen. Pages that are heavy for a Zero (the radar, now playing, system) run smoothly this
 way, and the same server can show the kiosk in a browser too.
 
-> **How it is today:** one render server draws for **one** Pi. A second Pi connecting to the same server takes over
-> from the first. For several kiosks, run one server for each: they're small, so a container each on one machine is
-> fine. Setting a server up and pairing it still uses SSH.
+> **How it is today:** one render server *process* (`kiosk-serve`) draws for **one** Pi, and a second Pi connecting
+> to it takes over from the first. One machine can still serve several kiosks, with a process for each:
+> [Several kiosks on one server](#several-kiosks-on-one-server) below. Setting a server up and pairing it still uses SSH.
 >
 > **Coming:** one server for any number of kiosks, with "Use a server" on the kiosk's setup page and a pairing code
 > instead of copying a key, every kiosk's settings and backups in one place on the server, and an encrypted link
@@ -64,6 +64,54 @@ way, and the same server can show the kiosk in a browser too.
 6. **Change its pages from the kiosk's setup page,** as before. With the key in place, the Pages, Transitions and
    Location tabs change what the server draws. Without the key, they show the server's settings but can't change them.
 
+## Several kiosks on one server
+
+Each kiosk gets its own `kiosk-serve` process, with its own port and its own home folder, so its own settings,
+caches and installed pages. They share one copy of the code, and the server's update keeps it current for all of
+them. Hive76's TKiosk-Server, a Pi 4 with 8 GB, runs its kiosks this way.
+
+1. **Set up the server as above** for the first kiosk. Its `kiosk-serve` uses `/home/kiosk` and port 7676.
+
+2. **Add a template for the rest,** as root, in `/etc/systemd/system/kiosk-serve@.service`:
+   ```ini
+   [Unit]
+   Description=Wi-Ki render server for %i
+   After=network-online.target
+
+   [Service]
+   User=kiosk
+   Environment=HOME=/home/kiosk/servers/%i
+   Environment=KIOSK_MAPS=/home/kiosk/servers/maps
+   ExecStart=/usr/bin/python3 -I /home/kiosk/kiosk/kiosk.py --serve
+   Restart=always
+   RestartSec=3
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   `HOME` gives each instance its own `~/.config/kiosk`, `~/.cache/kiosk` and `~/.local/share/kiosk`.
+   `KIOSK_MAPS` lets them share the street maps, so the radar's map is fetched once rather than once per kiosk.
+
+3. **For each kiosk,** pick a name and a port (7677, 7678, …), and as the `kiosk` user write
+   `/home/kiosk/servers/<name>/.config/kiosk/remote.json`:
+   ```json
+   {"server": "<server address>", "port": 7677, "key": "<this kiosk's key>"}
+   ```
+   It needs `"server"` as well as `"port"`, because the server only reads the port when a server is named. Then
+   `systemctl enable --now kiosk-serve@<name>` as root, and point that kiosk's own `remote.json` at the same address
+   and port.
+
+**Worth knowing:**
+- **Don't run `pi-setup.sh` again for the extra kiosks.** It only sets up the one `kiosk-serve` and the browser
+  kiosks.
+- **Installing pages:** the server's update installs what `/home/kiosk/.config/kiosk/installed.json` lists, not what
+  each instance's playlist names. Add a page there before an instance can show it.
+- **An update restarts every instance at once,** and each Pi draws its own pages until it reconnects, about a minute
+  later.
+- **Each instance takes memory:** about 80 MB just after it starts on a Pi 4, and more once it has drawn every page.
+  Size the machine for all of them.
+- Touches go up each kiosk's own link, so two people swiping on two screens don't collide.
+
 ## What it does
 
 - After every frame, the server sends the Pi only the rows that changed, compressed. On a page change it sends the new
@@ -90,7 +138,8 @@ someone's watching. A page shows up in a shape only if it can lay itself out for
 
 - **The kiosk still draws its own pages:** check `remote.json` on the kiosk (the server's address and port), and that
   the kiosk can reach port 7676 on the server. Firewalls between VLANs are the usual cause.
-- **Two kiosks keep taking turns:** they're pointed at the same server, which only draws for one. Give each its own.
+- **Two kiosks keep taking turns:** they're pointed at the same `kiosk-serve`, which only draws for one. Give each its
+  own instance, on its own port ([above](#several-kiosks-on-one-server)).
 - **The setup page shows the server's settings but won't save:** the keys don't match, or one side has none. They have
   to be the same 64 characters on both.
 - **The server isn't updating:** `sudo python3 -I ~/kiosk/autoupdate.py --status` on it shows what's applied and what's
