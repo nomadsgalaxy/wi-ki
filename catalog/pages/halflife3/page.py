@@ -7,11 +7,11 @@ It really checks: once an hour, in a background thread, it searches the Steam st
 A coming-soon listing is still NO, and the HEV says it's listed. The answer goes in CACHE, so a restart doesn't forget
 it, and a failed search keeps the last answer. The colours are Half-Life's, and only this page uses them.
 """
-import json, math, os, threading, time, urllib.parse, urllib.request
+import json, math, os, time, urllib.parse, urllib.request
 from datetime import date, datetime
 from PIL import Image, ImageChops, ImageDraw
 
-from kit import SCREEN, W, text, clock, packed, since
+from kit import SCREEN, W, Simple, text, clock, packed, since
 
 EPISODE_TWO = date(2007, 10, 10)
 SINCE = "since 10 Oct 2007"
@@ -269,48 +269,33 @@ def draw(now, answer):
     return img
 
 
-class Page:
+class Page(Simple):
     """the question, as a page of the kiosk's cycle"""
-    name, seconds, fps = "halflife3", 15, FPS
+    name, seconds, fps, every, cache = "halflife3", 15, FPS, EVERY, CACHE
+    SAMPLE = {"released": False, "name": "", "checked": "2026-10-15T15:00"}
 
-    def __init__(self, answer=None):
-        self.fixed = answer is not None   # given an answer (the self-test), it never searches
-        try:
-            self.answer = valid(answer or json.load(open(CACHE)))
-        except (OSError, ValueError):
-            self.answer = None
-        self.asked, self.bg = 0.0, (None, None)
+    def fetch(self):
+        get = lambda url: json.load(urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15))
+        hit = listed(get(SEARCH))
+        out = bool(hit) and out_now(get(DETAILS.format(int(hit["id"]))), hit["id"])
+        return {"released": out, "listed": bool(hit), "name": str(hit["name"]) if hit else "",
+                "checked": datetime.now().isoformat(timespec="minutes")}
 
-    def ask(self):
-        try:
-            get = lambda url: json.load(urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15))
-            hit = listed(get(SEARCH))
-            out = bool(hit) and out_now(get(DETAILS.format(int(hit["id"]))), hit["id"])
-            self.answer = {"released": out, "listed": bool(hit), "name": str(hit["name"]) if hit else "",
-                           "checked": datetime.now().isoformat(timespec="minutes")}
-            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-            with open(CACHE + ".tmp", "w") as f:
-                json.dump(self.answer, f)
-            os.replace(CACHE + ".tmp", CACHE)
-        except Exception:
-            pass   # keep the last answer; try again in an hour
+    def clean(self, data):
+        return valid(data)   # a bad cache is the same as no cache
 
-    def start(self, now):
-        if not self.fixed and time.time() - self.asked > EVERY:
-            self.asked = time.time(); threading.Thread(target=self.ask, daemon=True).start()
+    def redraw_on(self, now):
+        return now.date()
 
-    def background(self, now):
-        key = (now.date(), json.dumps(self.answer, sort_keys=True))
-        if key != self.bg[0]:
-            base, out = scene(now, self.answer), bool(self.answer and self.answer.get("released"))
-            self.lambdas = [packed(lambda_tile(base, k, out)) for k in range(GLOW)]   # made once a day; drawn every frame
-            self.crabs = [packed(crab_tile(base, k, out)) for k in range(HOP)]
-            self.said, self.base, self.out = lines(now, self.answer), base, out
-            self.typed, self.status = typing(self.said), {}
-            self.bg = (key, packed(draw(now, self.answer)))
-        return self.bg
+    def draw(self, img, now, data):
+        base, out = scene(now, data), bool(data and data.get("released"))
+        self.lambdas = [packed(lambda_tile(base, k, out)) for k in range(GLOW)]   # made once a day; drawn every frame
+        self.crabs = [packed(crab_tile(base, k, out)) for k in range(HOP)]
+        self.said, self.base, self.out = lines(now, data), base, out
+        self.typed, self.status = typing(self.said), {}
+        img.paste(draw(now, data))
 
-    def regions(self, now, t):
+    def moving(self, now, t, data):
         f = int(t * FPS)
         i, n = self.typed[f % len(self.typed)]
         if (i, n) not in self.status:
@@ -332,7 +317,8 @@ def check():
     for bad in (None, [], {"released": "yes", "name": "", "checked": "2026-10-15T15:00"}, {"released": False, "name": "", "checked": "soon"},
                 {"released": False, "checked": "2026-10-15T15:00"}, {"released": False, "name": 3, "checked": "2026-10-15T15:00"}):
         assert valid(bad) is None, f"a cache like {bad!r} is ignored"
-    listing = Page(good); listing.background(datetime(2026, 10, 15, 16, 0))
+    Page.check()
+    listing = Page.showing(good); listing.background(datetime(2026, 10, 15, 16, 0))
     assert "coming soon" in listing.said[0] and not listing.out, "a coming-soon listing says so, and is still NO"
     now = datetime(2026, 10, 15, 16, 0)
     assert (now.date() - EPISODE_TWO).days == 6945 and since(EPISODE_TWO, now.date()) == "19 years, 5 days"
@@ -341,7 +327,7 @@ def check():
                    {"released": True, "name": "Half-Life 3", "checked": "2026-10-15T15:00"}):
         assert draw(now, answer).size == SCREEN, "draws before the first check, with no, and with yes"
     assert CRABS["apex"].width < STRIP[2] - STRIP[0] and CRABS["apex"].height + 30 < STRIP[3] - STRIP[1], "the crab fits its strip with room to hop"
-    page = Page({"released": False, "name": "", "checked": "2026-10-15T15:00"})
+    page = Page.showing({"released": False, "name": "", "checked": "2026-10-15T15:00"})
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key, "redrawn only when something changes"
     seen = [[im.tobytes() for im, _ in page.regions(now, f / FPS)] for f in range(HOP)]
@@ -380,7 +366,7 @@ def check():
         assert path[k][0] == "crouch" and path[k][2] == sh and path[k][1:3] == path[(k + 1) % HOP][1:3], "it has landed on the floor by the last frame of a leap"
     assert {path[k][2] for k in range(HOP // 2 - 8, HOP // 2 - 1)} != {sh}, "and the leap before it is in the air"
     assert "10 Oct 2007" in SINCE, "the reserve says what 2007 is"
-    yes = Page({"released": True, "name": "Half-Life 3", "checked": "2026-10-15T15:00"}); yes.background(now)
+    yes = Page.showing({"released": True, "name": "Half-Life 3", "checked": "2026-10-15T15:00"}); yes.background(now)
     assert "detected" in yes.said[0] and len({c.tobytes() for c in yes.crabs}) == 1, "out: it says so, and the crab gives up"
     lying = crab_tile(base, 0, True).convert("RGB"); gap = ImageChops.difference(lying, strip.convert("RGB")).getbbox()[3]
     assert strip.height - 12 < gap <= strip.height - 8, "on its back it rests on the floor line, not floating or in the stripe"
@@ -389,5 +375,5 @@ def check():
 def preview(now=None):
     """the page as it's been since 2007, for the emulator and kiosk.py --png"""
     import kit
-    page = Page({"released": False, "name": "", "checked": "2026-10-15T15:00"})
+    page = Page.showing(Page.SAMPLE)
     return kit.unpack(page.background(now or datetime(2026, 10, 15, 16, 0))[1])

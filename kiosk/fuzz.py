@@ -10,7 +10,7 @@ picture it hands the display is the screen's size, or fits on the screen where i
   fuzz.py PAGE [N]     one page, N tries, saying what went wrong in each (any kit.Simple page, too: their check()
                        runs 20 tries itself)
 """
-import copy, importlib, json, os, random, sys, tempfile, traceback, types
+import contextlib, copy, importlib, io, json, os, random, sys, tempfile, traceback, types
 from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -20,8 +20,8 @@ import kit  # noqa: E402
 
 # how each page is handed its data: a test argument, or a file it reads (the option that names it, and the file's
 # name in a folder for a page that reads a folder)
-TAKES = {"around": ("data", None), "cfradar": ("data", None), "radar": ("planes", None), "septa": ("data", None),
-         "sports": ("data", None), "weather": ("w", None), "agents": ("feed", "file"), "github": ("feed", "file"),
+# a kit.Simple page that isn't here is handed its data with Page.showing()
+TAKES = {"around": ("data", None), "radar": ("planes", None), "agents": ("feed", "file"), "github": ("feed", "file"),
          "system": ("file", "file"), "calendar": ("events", "file"), "nowplaying": ("folder", "track.json")}
 TRIES = 40
 STRINGS = ["", " ", "x" * 300, "Ωμέγα · 漢字 · العربية · 🙂🚀", "a\tb", "NaN", "0", "-1", "<b>&amp;</b>", "​"]
@@ -60,9 +60,8 @@ def mangle(value, rnd, depth=0):
 def build(name, data, folder):
     """the page, built the way the display builds it, with data -> Page"""
     module = importlib.import_module(f"pages.{name}.page")
-    if name not in TAKES and issubclass(module.Page, kit.Simple):   # a Simple page is handed its data straight
-        page = module.Page(); page.every, page.data = 0, data
-        return page
+    if name not in TAKES:
+        return module.Page.showing(data)
     option, kind = TAKES[name]
     if kind is None:
         return module.Page(**{option: data})
@@ -75,13 +74,14 @@ def build(name, data, folder):
     return module.Page(**{option: folder})
 
 
-def run(page, now):
-    """start it, draw it and move it on a few frames -> what's wrong, or None"""
+def run(page, now, strict=False):
+    """start it, draw it and move it on a few frames -> what's wrong, or None. strict: a Simple page that refused the
+    data (it keeps its last picture, so that's allowed) says why too"""
     w, h = kit.SCREEN
     page.start(now)
     for t in (0, .5, 3, 30):
         _, bg = page.background(now + timedelta(seconds=t))   # (what it shows, the picture), as the display asks
-        if getattr(page, "failed", None):   # a Simple page shows its error rather than raising it
+        if strict and getattr(page, "failed", None):   # a Simple page shows its error rather than raising it
             return page.failed
         if bg.size != kit.SCREEN:
             return f"its background is {bg.size}, not {kit.SCREEN}"
@@ -90,7 +90,7 @@ def run(page, now):
                 img = types.SimpleNamespace(width=w, height=len(img) // w // 2)
             if x < 0 or y < 0 or x + img.width > w or y + img.height > h:
                 return f"a region at ({x}, {y}), {img.width}x{img.height}, goes off the screen"
-    return getattr(page, "failed", None)
+    return getattr(page, "failed", None) if strict else None
 
 
 def fuzz(name, tries=TRIES, seed=19, say=False):
@@ -103,7 +103,8 @@ def fuzz(name, tries=TRIES, seed=19, say=False):
         data = sample if n == 0 else mangle(copy.deepcopy(sample), rnd)   # the first try is the sample as it is
         with tempfile.TemporaryDirectory() as folder:
             try:
-                why = run(build(name, data, os.path.join(folder, "feed")), now)
+                with contextlib.nullcontext() if say else contextlib.redirect_stdout(io.StringIO()):   # a refusal's own note
+                    why = run(build(name, data, os.path.join(folder, "feed")), now, strict=say)
             except Exception as e:
                 why = f"{type(e).__name__}: {e}"[:200]
                 if say:
@@ -113,12 +114,28 @@ def fuzz(name, tries=TRIES, seed=19, say=False):
     return failed
 
 
+def names():
+    """the pages fuzz knows how to feed: TAKES, and every kit.Simple page with a SAMPLE"""
+    import pages
+    out = set(TAKES)
+    for d in pages.__path__:
+        for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if name not in out and os.path.isfile(os.path.join(d, name, "page.py")):
+                try:
+                    page = importlib.import_module(f"pages.{name}.page").Page
+                except Exception:
+                    continue   # kiosk.py --check says why
+                if issubclass(page, kit.Simple) and page.SAMPLE is not None:
+                    out.add(name)
+    return sorted(out)
+
+
 def check():
-    bad = {name: fuzz(name) for name in TAKES}
+    bad = {name: fuzz(name) for name in names()}
     bad = {k: v for k, v in bad.items() if v}
     assert not bad, "pages that don't hold up with odd data:\n" + "\n".join(
         f"  {k}: {len(v)} of {TRIES}, first: try {v[0][0]}: {v[0][1]}" for k, v in bad.items())
-    print(f"fuzz: ok ({len(TAKES)} pages, {TRIES} tries each)")
+    print(f"fuzz: ok ({len(names())} pages, {TRIES} tries each)")
 
 
 if __name__ == "__main__":
@@ -126,6 +143,6 @@ if __name__ == "__main__":
         for n, why in fuzz(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else TRIES, say=True):
             print(f"try {n}: {why}")
     else:
-        bad = {name: fuzz(name) for name in TAKES}
+        bad = {name: fuzz(name) for name in names()}
         for name, failed in bad.items():
             print(f"{name:11} {len(failed):2} of {TRIES} failed" + (f"  first: try {failed[0][0]}: {failed[0][1]}" if failed else ""))

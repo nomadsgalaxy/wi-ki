@@ -11,7 +11,7 @@ import json, math, os, time
 from datetime import datetime
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, O, W, G, D, A, BG, RULE, RAISED, text, masthead, packed, level, meter
+from kit import SCREEN, O, W, G, D, A, BG, RULE, RAISED, Simple, text, masthead, packed, level, meter
 
 TOP, MARGIN = 98, 16
 PANELS = [(16, 776), (784, 1352), (1360, 1904)]   # CPU, GPU, everything else
@@ -168,12 +168,20 @@ def draw(now, s, note=None, pi=(None, 0.0, None)):
     return img
 
 
-class Page:
+SAMPLE = {"cpu": 37.4, "threads": [92, 71, 64, 40, 33, 20, 15, 9, 8, 5, 4, 6, 80, 55, 13, 6, 3, 3, 1, 2, 3, 1, 3, 8],
+          "rx": 1234567, "tx": 18505, "iface": "enp5s0", "disk_used": 399, "disk_total": 987, "host": "Anthony-Desktop",
+          "model": "Ryzen 9 9900X", "cpu_temp": 71.5, "disk_temp": 40.9,
+          "gpu": {"name": "RTX 2070 SUPER", "util": 19.0, "temp": 53.0, "vram_used": 3.6, "vram_total": 8.0, "power": 54.6},
+          "load": 2.41, "uptime": 517777, "mem_used": 19.1, "mem_total": 30.4, "swap_used": 21.3, "swap_total": 38.4,
+          "cpu_hist": [20 + (i * 13) % 70 for i in range(60)], "gpu_hist": [10 + (i * 7) % 40 for i in range(45)]}
+
+
+class Page(Simple):
     """the desktop's resources, as a page of the kiosk's cycle"""
-    name, seconds = "system", 20
+    name, seconds, SAMPLE = "system", 20, SAMPLE
 
     def __init__(self, file="/dev/shm/kiosk-system.json"):
-        self.file, self.bg, self.data = file, (None, None), None
+        self.file = file
 
     def active(self):
         """skipped while the desktop's away: the sink removes the file when the stream ends, and a stuck one goes stale"""
@@ -182,34 +190,14 @@ class Page:
         except OSError:
             return False
 
-    def start(self, now):
-        pass   # background() reads each new sample as it lands
+    def clean(self, data):
+        return clean(data)
 
-    def background(self, now):
-        mtime = os.path.getmtime(self.file) if os.path.exists(self.file) else None
-        age = time.time() - mtime if mtime else None
-        stale = age is not None and age > STALE
-        key = (mtime, now.minute, stale)
-        if key != self.bg[0]:
-            try:
-                self.data = clean(json.load(open(self.file))) if mtime else None
-            except (OSError, ValueError):
-                pass   # half written: keep the last sample
-            note = ("waiting for the desktop", A) if not self.data else \
-                (f"no update for {round(age)} s", A) if stale else ("live · every 2 s", D)
-            self.bg = (key, packed(draw(now, self.data, note, kiosk_stats())))
-        return self.bg
+    def draw(self, img, now, data):
+        note = ("waiting for the desktop", A) if not data else \
+            (f"no update for {round(self.age())} s", A) if self.age() > STALE else ("live · every 2 s", D)
+        img.paste(draw(now, data, note, kiosk_stats()))   # it all changes together, every 2 seconds: nothing moves
 
-    def regions(self, now, t):
-        return []   # it all changes together, every 2 seconds
-
-
-SAMPLE = {"cpu": 37.4, "threads": [92, 71, 64, 40, 33, 20, 15, 9, 8, 5, 4, 6, 80, 55, 13, 6, 3, 3, 1, 2, 3, 1, 3, 8],
-          "rx": 1234567, "tx": 18505, "iface": "enp5s0", "disk_used": 399, "disk_total": 987, "host": "Anthony-Desktop",
-          "model": "Ryzen 9 9900X", "cpu_temp": 71.5, "disk_temp": 40.9,
-          "gpu": {"name": "RTX 2070 SUPER", "util": 19.0, "temp": 53.0, "vram_used": 3.6, "vram_total": 8.0, "power": 54.6},
-          "load": 2.41, "uptime": 517777, "mem_used": 19.1, "mem_total": 30.4, "swap_used": 21.3, "swap_total": 38.4,
-          "cpu_hist": [20 + (i * 13) % 70 for i in range(60)], "gpu_hist": [10 + (i * 7) % 40 for i in range(45)]}
 
 
 def check():
@@ -226,6 +214,7 @@ def check():
     for s in (SAMPLE, None, broken, {"host": "x"}, clean({"cpu": None, "gpu": {}, "host": "ß" * 99, "rx": "9"})):
         assert draw(now, s).size == SCREEN, "draws with, without and with broken data"
     path = os.path.join(tempfile.mkdtemp(), "system.json")
+    Page.check()
     page = Page(path)
     assert page.background(now)[1].size == SCREEN and page.data is None and not page.active(), "no stream: skipped"
     json.dump(SAMPLE, open(path, "w"))

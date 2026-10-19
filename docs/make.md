@@ -70,6 +70,32 @@ on one.
    on the screen. So write `draw()` for anyone's data: `.get()` with a default, `str()` before you draw a number, and
    `[:n]` on text that could be long. `python3 -I kiosk/fuzz.py hello 200` tries more and shows where it broke.
 
+### Pages like the ones Wi-Ki comes with
+
+Most of the catalog's pages are made this way, so they're the examples. Each thing below is a line or two in the page:
+
+| what the page needs | how | like |
+|---|---|---|
+| data from the internet, fetched once for every screen a render server draws | `fetch()` and `every`. The data goes in a cache file every renderer shares, one for each set of options; `cache = "..."` names it yourself | septa, cfradar |
+| to fetch more often while something's on | `every` as a `@property` | sports (every 30 s during a game) |
+| data a desktop or another program writes | `file = "..."`: read again whenever it changes | github, agents, system, now playing |
+| to check data before drawing it | `clean(data)` returns the data as `draw()` wants it, or `None` to keep what it had | sports, system, weather |
+| to say why the data's missing | `self.problem` is why the last fetch failed: raise an exception that says it the way the page should | septa, cfradar |
+| to show how old the data is | `self.updated` (a time) and `self.age()` (seconds) | weather, system |
+| to redraw less often than every minute | `redraw_on(now)`: return what the picture depends on, like `now.date()` | halflife3 |
+| smooth animation | `fps = 20`, and `moving()` handing back pictures packed ahead of time (`kit.packed()`), or whole rows of raw bytes | now playing, septa's train |
+| to animate part of its own picture | `self.drawn` is the packed picture showing now, to crop from | now playing, agents |
+| to sit out the rotation | `active()`: return `False` when there's nothing to show (call `self.load()` first for the latest data) | now playing, github |
+| touches | `touch(x, y)`, then `self.redraw()` | around (which writes the full interface) |
+| more than one shape (TVs, phones) | `shapes = ("bar", "16-9", "9-16")`, and draw to `img.size` | radar (which writes the full interface) |
+| anything else in the background, like logos | your own thread, then `self.redraw()` when it's done | sports |
+
+In tests, `Page.showing(data)` is the page drawing that data, never fetching or reading.
+
+**What `Simple` doesn't do yet:** a page with several sources, each fetched on its own clock, like radar (planes,
+routes, a street map and the rain) or around (311 reports, bikes and streets). Those two, and the home page, still
+write the whole page interface themselves.
+
 ## A transition
 
 1. **Start it:**
