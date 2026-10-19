@@ -28,12 +28,17 @@ SECONDS, FPS = 3, 24   # slow enough to watch; 24 fps is what the busiest one ma
 FIRST = ("coreone", "hive76", "nomadsgalaxy", "matrix", "hackerman", "johnny5")   # the order they've always taken turns in
 
 
-def themes():
-    """every installed theme -> {name: module}, the usual ones first in their order, then the rest by name"""
-    names = {f[:-3] for d in __path__ if os.path.isdir(d) for f in os.listdir(d)
+def names():
+    """every installed theme's name, the usual ones first in their order, then the rest by name"""
+    found = {f[:-3] for d in __path__ if os.path.isdir(d) for f in os.listdir(d)
              if f.endswith(".py") and f not in ("__init__.py", "canvas.py")}
+    return sorted(found, key=lambda n: (FIRST.index(n) if n in FIRST else len(FIRST), n))
+
+
+def themes():
+    """every installed theme -> {name: module}, in names() order"""
     found = {}
-    for name in sorted(names, key=lambda n: (FIRST.index(n) if n in FIRST else len(FIRST), n)):
+    for name in names():
         try:
             found[name] = importlib.import_module(f"{__name__}.{name}")
         except Exception as e:   # a broken one is left out, and says why, rather than stopping the display
@@ -41,7 +46,8 @@ def themes():
     return found
 
 
-THEMES = themes()
+# a render server only names the theme for the Pi to play, so it doesn't load them: some build ~30 MB of sprites
+THEMES = {name: None for name in names()} if "--serve" in sys.argv else themes()
 OFF = os.path.expanduser("~/.config/kiosk/transitions-off.json")
 
 

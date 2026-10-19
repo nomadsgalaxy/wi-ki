@@ -75,11 +75,17 @@ Some kiosks will have touch screens and some won't, so a page must work untouche
   and starts the page's time over, so the rotation doesn't move on from under someone's finger. Untouched, the page must
   still make sense: `around` goes back to its own view after `IDLE` seconds.
 - **Touches arrive as a file**, `~/.cache/kiosk/touch.json` (`touch-<shape>.json` for the browser shapes):
-  `{"x": .., "y": ..}`, watched like the control file. `kiosk-ctl touch X Y` writes one, to try a page without a screen.
-- **Still to do, when a touch screen is fitted:** a reader on the Pi for the panel's evdev device (`/dev/input/event*`,
-  `ABS_MT_POSITION_X/Y`, scaled to the screen), standard library only; and, while the Pi shows the render server, a
-  `touch` message from the Pi to the server in `remote.py`'s protocol, so the touch reaches the page where it's drawn.
-  For the browser shapes, the front door can turn a click on the picture into the same file.
+  `{"x": .., "y": ..}` for a tap, or `{"gesture": "menu" | "next" | "prev"}`, watched like the control file. The reader
+  works out the gesture: a two-finger double tap is `menu` (the home page), a swipe left `next`, a swipe right `prev`.
+  A tap goes to the page if it takes touches; on any other page it holds the rotation still and brings up the home
+  button. `kiosk-ctl touch X Y` or `kiosk-ctl touch next` writes one, to try it without a screen.
+- **The panel:** `touchpanel.py` reads it on the Pi, in a thread of `kiosk.py`. It looks for a touch screen every few
+  seconds and does nothing until one turns up, then works out taps and gestures and writes the touch file. With a touch
+  screen, the home page joins the playlist by itself (never in the rotation), so the menu gesture has somewhere to go.
+  An upside-down screen (`rotate=180` in the kernel's `video=` option) turns the touches with it.
+- **On a kiosk with a render server**, the Pi sends each touch up the link (`TUCH` in `remote.py`), and the server
+  writes it to its own touch file, so the touch reaches the page where it's drawn.
+- **Still to do:** for the browser shapes, the front door could turn a click on the picture into the same file.
 - **Make touch targets big:** at least 44 px high, like `around`'s tabs, and keep them away from the screen's edges.
 
 ## Wi-Fi rescue
