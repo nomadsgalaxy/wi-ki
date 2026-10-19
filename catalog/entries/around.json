@@ -32,6 +32,76 @@
   "reports": null,
   "permits": null
  },
+ "form": {
+  "view": {
+   "type": "choice",
+   "label": "Shows",
+   "of": [
+    [
+     "all",
+     "everything"
+    ],
+    [
+     "reports",
+     "311 reports"
+    ],
+    [
+     "building",
+     "permits"
+    ],
+    [
+     "bikes",
+     "bikes"
+    ]
+   ]
+  },
+  "lat": {
+   "type": "number",
+   "label": "Latitude",
+   "min": -90,
+   "max": 90
+  },
+  "lon": {
+   "type": "number",
+   "label": "Longitude",
+   "min": -180,
+   "max": 180
+  },
+  "radius": {
+   "type": "number",
+   "label": "Radius",
+   "min": 100,
+   "max": 5000,
+   "whole": true,
+   "unit": "m"
+  },
+  "place": {
+   "type": "text",
+   "label": "Place, for the heading",
+   "max": 24,
+   "upper": true
+  },
+  "area": {
+   "type": "text",
+   "label": "Neighbourhood",
+   "max": 32
+  },
+  "bike_share": {
+   "type": "text",
+   "label": "Bike share's name",
+   "max": 24,
+   "upper": true
+  },
+  "bikes": {
+   "type": "internal"
+  },
+  "reports": {
+   "type": "internal"
+  },
+  "permits": {
+   "type": "internal"
+  }
+ },
  "ask": [],
  "licence": {
   "code": "MIT",

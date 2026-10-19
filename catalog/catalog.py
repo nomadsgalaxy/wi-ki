@@ -19,6 +19,7 @@ tree (or blob, for a transition) of each version, by the line it's on.
   ask       what installing it asks the owner for, from its settings and secrets: anything it needs a fresh API token
             for, or a server of some kind (a feed's address, a Home Assistant), and nothing else. septa's sfw is the
             one exception. A location has a working default, so it isn't asked.
+  form      optional: which settings the setup page may change, and how (kiosk/form.py has the rules)
   quality   the bar to clear: runs on a Zero, readable at its shapes, no flicker, licence clear, fails quietly.
             Each is unchecked, pass or fail. Having a check() is the sixth, and --check enforces that one itself.
 
@@ -35,11 +36,15 @@ It reads origin/main, the remote-tracking branch, so fetch first.
 """
 import ast, glob, json, os, re, subprocess, sys, tempfile
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "kiosk"))
+import form  # noqa: E402  the rules for "form", shared with the setup page
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 ENTRIES = os.path.join(HERE, "entries")
 LINES = {"main": (REPO, "origin/main")}
 FIELDS = {"name", "kind", "home", "about", "found", "shapes", "needs", "settings", "ask", "licence", "quality"}
+OPTIONAL = {"form"}
 CHOICES = {"kind": {"page", "transition"}, "home": {"public", "private", "hive", "core"}}
 NEEDS = {"render": {"any", "server"}, "touch": {True, False}}
 SHAPES_ORDER = ("bar", "16-9", "9-16")   # kit.SHAPES
@@ -142,8 +147,10 @@ def problems(entry, lines):
     """everything wrong with one catalog entry, against the code on lines ({line: (repo, ref)}), as sentences"""
     name = entry.get("name", "?")
     out = []
-    if set(entry) != FIELDS:
-        return [f"{name}: fields must be exactly {', '.join(sorted(FIELDS))}"]
+    if not FIELDS <= set(entry) <= FIELDS | OPTIONAL:
+        return [f"{name}: fields must be exactly {', '.join(sorted(FIELDS))}, and optionally {', '.join(sorted(OPTIONAL))}"]
+    if "form" in entry:
+        out += [f"{name}: {p}" for p in form.problems(entry["form"], entry.get("settings") or {})]
     for field, allowed in CHOICES.items():
         if entry[field] not in allowed:
             out.append(f"{name}: {field} must be one of {', '.join(sorted(allowed))}")
@@ -320,6 +327,10 @@ def test():
         wrong(lambda e: e["quality"].update(zero="probably"), "quality is")
         wrong(lambda e: e.update(about=""), "about says")
         wrong(lambda e: e.update(ask=["colour"]), "ask names")
+        wrong(lambda e: e.update(form={"colour": {"type": "text", "max": 4}}), "isn't one of its settings")
+        wrong(lambda e: e.update(form={"lat": {"type": "wheel"}}), "type is")
+        e = json.loads(json.dumps(sky)); e["form"] = {"lat": {"type": "number", "min": -90, "max": 90}}
+        assert problems(e, lines) == [], problems(e, lines)
         e = json.loads(json.dumps(sky)); e["needs"]["secrets"] = ["a token"]; e["ask"] = ["a token", "lat"]
         assert problems(e, lines) == [], problems(e, lines)
         wrong(lambda e: e["found"].update(one="abcdef"), "one has")

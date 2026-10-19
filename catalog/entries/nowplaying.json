@@ -18,6 +18,11 @@
  "settings": {
   "folder": "/dev/shm/kiosk-nowplaying"
  },
+ "form": {
+  "folder": {
+   "type": "internal"
+  }
+ },
  "ask": [
   "folder"
  ],

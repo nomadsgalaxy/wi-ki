@@ -42,6 +42,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves our own folder off the path
 
 import config, link, look, packs  # noqa: E402
+import form as schema  # noqa: E402  the rules for a page's settings panel
 
 CONF = os.path.dirname(config.PATH)
 TLS = os.path.join(CONF, "tls")
@@ -440,6 +441,9 @@ class Setup(BaseHTTPRequestHandler):
             return self.reply(page(self.state.cfg["id"], ("" if s["temporary"] else nav("/change")) + change_form(s)))
         if path == "/":
             return self.reply(page(self.state.cfg["id"], status_page(self.state, s["csrf"])))
+        if path == "/pages":   # ?set=N opens page N's settings
+            opened = urllib.parse.parse_qs(self.path.partition("?")[2]).get("set", [""])[0]
+            return self.reply(page(self.state.cfg["id"], pages_page(s["csrf"], opened=int(opened) if opened.isdigit() else None)))
         if path in SETTINGS:
             return self.reply(page(self.state.cfg["id"], SETTINGS[path](s["csrf"])))
         self.reply("Nothing here.", code=404)
@@ -574,6 +578,10 @@ class Setup(BaseHTTPRequestHandler):
                     save(playlist=change_pages(current()["playlist"], fields, catalog(), server()))
                 else:
                     save(playlist=change_location(current()["playlist"], fields, catalog()))
+            except schema.FieldError as e:   # a settings panel: open again, with what was typed and the error beside its field
+                i = fields.get("i", "")
+                return self.reply(page(st.cfg["id"], pages_page(s["csrf"], opened=int(i) if i.isdigit() else None,
+                                                                  typed=fields, wrong=e)), code=400)
             except ValueError as e:
                 return self.reply(page(st.cfg["id"], SETTINGS[path](s["csrf"], str(e))), code=400)
             except OSError as e:
@@ -786,6 +794,22 @@ def unusable(entry, drawn_by):
     return None
 
 
+def form_fields(posted):
+    """a settings panel's own fields from a post: the ones named f_<setting>"""
+    return {k: v for k, v in posted.items() if k.startswith("f_")}
+
+
+LANDSCAPES = [os.path.join(HERE, "landscapes"), os.path.join(HERE, "..", "catalog", "landscapes")]   # on a kiosk, in the repo
+
+
+def choices(kind):
+    """the names a kiosk has for a choice's "from": its landscapes"""
+    if kind != "landscapes":
+        return []
+    return sorted({n for d in LANDSCAPES if os.path.isdir(d) for n in os.listdir(d)
+                   if os.path.isfile(os.path.join(d, n, "landscape.json"))})
+
+
 def change_pages(entries, form, known, drawn_by=None):
     """the playlist after one change from the Pages form -> a new list, or ValueError saying what's wrong. known is the
     catalog, so only a real page can be added."""
@@ -817,6 +841,20 @@ def change_pages(entries, form, known, drawn_by=None):
         out[i + 1], out[i] = out[i], out[i + 1]
     elif action == "remove":
         out.pop(i)
+    elif action in ("settings", "reset"):
+        entry = known.get(out[i]["page"], {})
+        spec = entry.get("form") or {}
+        if not any(f["type"] != "internal" for f in spec.values()):
+            raise ValueError("That page has no settings to change here.")
+        posted = {k[2:]: v for k, v in form_fields(form).items()} if action == "settings" else {}
+        options = out[i].get("options", {})
+        if action == "reset":
+            options = {k: v for k, v in options.items() if k not in spec or spec[k]["type"] == "internal"}
+        else:
+            options = schema.apply(options, spec, posted, entry.get("settings", {}), choices)
+        out[i]["options"] = options
+        if not options:
+            out[i].pop("options")
     elif action not in ("up", "down"):
         raise ValueError("That isn't something this page does.")
     if out and not any(e.get("on", True) for e in out):
@@ -920,7 +958,52 @@ def button(csrf, action, label, i=None, extra="", danger=False):
             f'{label}</button></form>')
 
 
-def pages_page(csrf, note=""):
+def settings_panel(csrf, i, entry, known, typed=None, wrong=None):
+    """page i's settings, under its row: a field for each thing its catalog entry's form lets the setup page change,
+    showing what's set (or, after a refused save, what was typed, with the error beside its field)"""
+    meta = known.get(entry["page"], {})
+    spec, defaults, now = meta.get("form") or {}, meta.get("settings") or {}, entry.get("options", {})
+    shown = lambda name: (typed.get(f"f_{name}", "") if typed is not None else
+                          "" if now.get(name) is None else str(now[name]).lower() if isinstance(now[name], bool) else str(now[name]))
+    rows, ssh = [], []
+    for name, f in spec.items():
+        if f["type"] == "internal":
+            ssh.append(name); continue
+        field, label = f"f_{name}", html.escape(f.get("label", name))
+        default = defaults.get(name)
+        hint = f' placeholder="{html.escape(str(default))}"' if default not in (None, "", False) else ' placeholder="its own"'
+        if f["type"] == "bool":
+            on = (typed.get(field) == "on") if typed is not None else bool(now.get(name, default))
+            control = f'<label class=check><input type=checkbox name={field} value=on{" checked" if on else ""}> {label}</label>'
+        elif f["type"] == "choice":
+            options = list(f.get("of", [])) + [[n, n] for n in choices(f["from"])] if "from" in f else list(f["of"])
+            options = options if any(v == "" for v, _ in options) else [["", "its own"]] + options
+            pick = shown(name)
+            control = (f'<label>{label}<select name={field}>' + "".join(
+                f'<option value="{html.escape(v)}"{" selected" if v == pick else ""}>{html.escape(text)}</option>'
+                for v, text in options) + "</select></label>")
+        else:
+            kind = {"date": " type=date", "number": " inputmode=decimal"}.get(f["type"], "")
+            most = f' maxlength={f["max"]}' if f["type"] == "text" else ""
+            unit = f' <small>{html.escape(f["unit"])}</small>' if f.get("unit") else ""
+            control = f'<label>{label}{unit}<input name={field}{kind}{most} value="{html.escape(shown(name))}"{hint}></label>'
+        if wrong is not None and wrong.field == name:
+            control += f"<small class=bad>{html.escape(str(wrong))}</small>"
+        rows.append(control)
+    hidden = f'<input type=hidden name=csrf value="{csrf}"><input type=hidden name=i value="{i}">'
+    over_ssh = f"<p><small>Set over SSH: {html.escape(', '.join(ssh))}.</small></p>" if ssh else ""
+    return look.panel(f"{entry['page']} settings",
+                      f'<form method=post action=/pages class=go>{hidden}<input type=hidden name=action value=settings>'
+                      f'{"".join(rows)}<button>save</button> <a href=/pages>cancel</a></form>{over_ssh}'
+                      f'<form method=post action=/pages class=inline>{hidden}<input type=hidden name=action value=reset>'
+                      f'<button>reset to defaults</button></form>')
+
+
+def has_settings(meta):
+    return any(f["type"] != "internal" for f in (meta.get("form") or {}).values())
+
+
+def pages_page(csrf, note="", opened=None, typed=None, wrong=None):
     try:
         now = current()
     except (OSError, ValueError) as e:
@@ -934,12 +1017,16 @@ def pages_page(csrf, note=""):
                    f'<input type=hidden name=action value=seconds><input type=hidden name=i value="{i}">'
                    f'<label>seconds <input name=seconds inputmode=numeric value="{html.escape(str(e.get("seconds", "")))}" '
                    f'placeholder=own></label><button>save time</button></form>')
-        controls = "" if ro else (button(csrf, "off" if on else "on", "turn off" if on else "turn on", i) +
+        meta = known.get(e["page"], {})
+        settings = f'<a class=btn href="/pages?set={i}#p{i}">set</a>' if has_settings(meta) and opened != i else ""
+        controls = "" if ro else (settings + button(csrf, "off" if on else "on", "turn off" if on else "turn on", i) +
                                   button(csrf, "up", "↑ up", i) + button(csrf, "down", "↓ down", i) + seconds +
                                   button(csrf, "remove", "remove", i, danger=True))   # last, apart from the rest
-        rows.append(f"<li class='item {'on' if on else 'off'}'><span class=n>{i + 1:02}</span>"
+        panel = settings_panel(csrf, i, e, known, typed, wrong) if opened == i and has_settings(meta) and not ro else ""
+        rows.append(f"<li class='item {'on' if on else 'off'}' id=p{i}><span class=n>{i + 1:02}</span>"
                     f"<span class=name>{html.escape(e['page'])}</span><span class=tag>{'ON' if on else 'OFF'}</span>"
-                    f"<small>{html.escape(about)}</small><div class=actions>{controls}</div>")
+                    f"<small>{html.escape(about)}</small><div class=actions>{controls}</div>"
+                    + (f"<div class=sub>{panel}</div>" if panel else ""))
     adds = []
     for name, entry in sorted(known.items()):
         if entry.get("kind") != "page" or any(e["page"] == name for e in entries):
@@ -1261,6 +1348,23 @@ def settings_check():
             pass
         else:
             raise AssertionError(bad)
+    # a page's settings panel: only what its form names changes, defaults come out, and the rest is kept
+    known["weather"]["form"] = {"units": {"type": "choice", "label": "Units", "of": [["", "own"], ["f", "°F"], ["c", "°C"]]},
+                                "place": {"type": "text", "max": 24, "upper": True}, "feed": {"type": "internal"}}
+    known["weather"]["settings"]["feed"] = None
+    kept = [{"page": "weather", "options": {"lat": 1.0, "feed": "/x"}}, {"page": "clock"}]
+    got = change_pages(kept, {"action": "settings", "i": "0", "f_units": "c", "f_place": "home"}, known)
+    assert got[0]["options"] == {"lat": 1.0, "feed": "/x", "units": "c", "place": "HOME"} and kept[0]["options"] == {"lat": 1.0, "feed": "/x"}
+    assert change_pages(got, {"action": "reset", "i": "0"}, known)[0]["options"] == {"lat": 1.0, "feed": "/x"}, \
+        "reset takes out what the form manages, and nothing else"
+    for bad in ({"action": "settings", "i": "0", "f_units": "kelvin"}, {"action": "settings", "i": "0", "f_feed": "/etc/shadow"},
+                {"action": "settings", "i": "1", "f_units": "c"}):
+        try:
+            change_pages(kept, bad, known)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(bad)
     assert change_transitions({"t_matrix": "on"}, ["coreone", "matrix"]) == ["coreone"]
     try:   # only "on" ticks a box, so this leaves both off, and that's refused
         change_transitions({"t_matrix": "yes"}, ["coreone", "matrix"])
@@ -1284,7 +1388,9 @@ def check():
         CATALOG, THEMES, CACHE = [f"{d}/entries"], [f"{d}/themes"], f"{d}/cache"
         os.makedirs(f"{d}/conf"); os.makedirs(f"{d}/entries"); os.makedirs(f"{d}/themes")
         where = {"lat": None, "lon": None, "place": "PHILADELPHIA"}
-        for e in ({"name": "weather", "kind": "page", "about": "the <b>weather</b>", "settings": where},
+        for e in ({"name": "weather", "kind": "page", "about": "the <b>weather</b>", "settings": {**where, "units": None},
+                   "form": {"units": {"type": "choice", "label": "Units", "of": [["", "own"], ["f", "°F"], ["c", "°C"]]},
+                            "place": {"type": "text", "label": "Place", "max": 24, "upper": True}, "lat": {"type": "internal"}}},
                   {"name": "sky", "kind": "page", "about": "a sky", "settings": where},
                   {"name": "big", "kind": "page", "about": "a big one", "needs": {"render": "server"}},
                   {"name": "rain", "kind": "transition", "about": "rain"}):
@@ -1464,6 +1570,18 @@ def check():
         assert post("/location", {"lat": "40.1", "lon": "-75.2", "place": "home"})[0] == 303
         assert [e.get("options") for e in json.load(open(PLAYLIST))] == [{"lat": 40.1, "lon": -75.2, "place": "HOME"}] * 2
         assert post("/location", {"lat": "91", "lon": "0"})[0] == 400
+        # a page's settings panel, from its catalog entry's form
+        body = ask("GET", "/pages", name, cookies={"__Host-kiosk": session})[2]
+        assert 'href="/pages?set=0#p0"' in body and "weather settings" not in body.lower()
+        body = ask("GET", "/pages?set=0", name, cookies={"__Host-kiosk": session})[2]
+        assert "<legend>weather settings</legend>" in body and "name=f_units" in body and "Set over SSH: lat" in body
+        status, _, body, _, _ = post("/pages", {"action": "settings", "i": "0", "f_units": "kelvin", "f_place": "porch"})
+        assert status == 400 and "Units isn&#x27;t one of the choices" in body and 'value="porch"' in body, \
+            "refused: the panel opens again with what was typed and the error beside its field"
+        assert post("/pages", {"action": "settings", "i": "0", "f_lat": "0", "f_units": "c"})[0] == 400, "an internal setting is refused"
+        assert post("/pages", {"action": "settings", "i": "0", "f_units": "c", "f_place": "porch"})[:2] == (303, "/pages")
+        assert json.load(open(PLAYLIST))[0]["options"] == {"lat": 40.1, "lon": -75.2, "place": "PORCH", "units": "c"}
+        assert post("/pages", {"action": "reset", "i": "0"})[0] == 303 and json.load(open(PLAYLIST))[0]["options"] == {"lat": 40.1, "lon": -75.2}
         assert post("/transitions", {"t_rain": "on"})[0] == 303 and json.load(open(OFF)) == ["snow"]
         assert post("/transitions", {})[0] == 400, "not every transition off"
         # the Install page: a request for packs.py, checked here first

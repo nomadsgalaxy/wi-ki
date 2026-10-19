@@ -20,6 +20,12 @@
  "settings": {
   "sfw": false
  },
+ "form": {
+  "sfw": {
+   "type": "bool",
+   "label": "Keep it clean (no swearing)"
+  }
+ },
  "ask": [
   "sfw"
  ],

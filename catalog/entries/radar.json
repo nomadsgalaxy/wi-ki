@@ -29,6 +29,28 @@
   "lon": -75.17,
   "radius": 25
  },
+ "form": {
+  "lat": {
+   "type": "number",
+   "label": "Latitude",
+   "min": -90,
+   "max": 90
+  },
+  "lon": {
+   "type": "number",
+   "label": "Longitude",
+   "min": -180,
+   "max": 180
+  },
+  "radius": {
+   "type": "number",
+   "label": "Radius",
+   "min": 5,
+   "max": 250,
+   "whole": true,
+   "unit": "km"
+  }
+ },
  "ask": [],
  "licence": {
   "code": "MIT",
