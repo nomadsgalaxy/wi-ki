@@ -13,7 +13,7 @@ tree (or blob, for a transition) of each version, by the line it's on.
    "quality": {"zero": "unchecked", "shapes": "unchecked", "flicker": "unchecked", "licence": "unchecked",
                "offline": "unchecked"}}
 
-  home      public (the open catalog), private (ours only), hive (Hive76's repo), core (part of the runtime, not a pack)
+  home      public (the open catalog), private (ours only), hive (a partner's repo), core (part of the runtime, not a pack)
   render    any: a Zero can draw it; server: its data only reaches the render server (a desktop feed)
   services  every host its code talks to; secrets  what it has to be given, by reference, never in its settings
   ask       what installing it asks the owner for, from its settings and secrets: anything it needs a fresh API token

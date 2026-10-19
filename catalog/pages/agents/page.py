@@ -168,24 +168,24 @@ def draw_herdr(img, d, herdr, x0, y1):
 
 SAMPLE = {"updated": "2026-10-15T03:28:36+00:00",
           "usage": {"error": None, "items": [
-              {"label": "Claude Personal", "error": None, "windows": [
+              {"label": "Claude", "error": None, "windows": [
                   {"name": "5h", "used": 24.0, "resets": "2026-10-15T07:30:00+00:00"},
                   {"name": "week", "used": 8.0, "resets": "2026-10-20T04:00:00+00:00"},
                   {"name": "Fable", "used": 4.0, "resets": "2026-10-20T04:00:00+00:00"}]},
-              {"label": "Claude Work", "error": None, "windows": [
+              {"label": "Claude (team)", "error": None, "windows": [
                   {"name": "5h", "used": 6.0, "resets": "2026-10-15T06:00:00+00:00"},
                   {"name": "week", "used": 55.0, "resets": "2026-10-18T01:00:00+00:00"},
                   {"name": "Fable", "used": 91.0, "resets": "2026-10-18T01:00:00+00:00"}]},
               {"label": "Codex", "error": None, "windows": [{"name": "week", "used": 6.0, "resets": "2026-10-20T14:51:51Z"}]}]},
           "herdr": {"error": None, "items": [
-              {"label": "EventTracker", "agents": [{"title": "EventTracker Next.js", "status": "idle", "agent": "claude"}]},
-              {"label": "Astroledger", "agents": [{"title": t, "status": "idle", "agent": "claude"} for t in ("AL-Dev", "AL-Aux", "AL-Doc")]},
-              {"label": "Staff-Travel-Checklist", "agents": [{"title": "stc-dev", "status": "working", "agent": "claude"},
-                                                             {"title": "stc-aux", "status": "done", "agent": "claude"},
-                                                             {"title": "stc-doc", "status": "idle", "agent": "claude"}]},
-              {"label": "GalacticBoard", "agents": [{"title": "GM-Dev", "status": "working", "agent": "claude"}]},
-              {"label": "personal", "agents": [{"title": "Kiosk weather, GitHub and tokens", "status": "working", "agent": "claude"}]},
-              {"label": "Home-Desktop", "agents": [{"title": "Solidcraft", "status": "blocked", "agent": "claude"}]},
+              {"label": "website", "agents": [{"title": "website Next.js", "status": "idle", "agent": "claude"}]},
+              {"label": "budget-app", "agents": [{"title": t, "status": "idle", "agent": "claude"} for t in ("app-dev", "app-aux", "app-doc")]},
+              {"label": "trip-planner", "agents": [{"title": "trip-dev", "status": "working", "agent": "claude"},
+                                                             {"title": "trip-aux", "status": "done", "agent": "claude"},
+                                                             {"title": "trip-doc", "status": "idle", "agent": "claude"}]},
+              {"label": "game-board", "agents": [{"title": "board-dev", "status": "working", "agent": "claude"}]},
+              {"label": "personal", "agents": [{"title": "Kiosk weather and GitHub", "status": "working", "agent": "claude"}]},
+              {"label": "desktop", "agents": [{"title": "cad-tools", "status": "blocked", "agent": "claude"}]},
               {"label": "empty", "agents": []}]}}
 
 

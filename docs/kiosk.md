@@ -4,7 +4,7 @@ This takes a Raspberry Pi from a blank SD card to a kiosk showing your pages. On
 happens in a browser on the kiosk's setup page.
 
 > **Coming:** a ready-made Wi-Ki image you flash and boot, which puts up its own Wi-Fi hotspot so you can pick your
-> network from a phone (board topic 102). When it lands, step 2 below goes away and this guide changes to match.
+> network from a phone. When it lands, step 2 below goes away and this guide changes to match.
 > Until then, writing the card takes one command on a computer.
 
 ## What you need

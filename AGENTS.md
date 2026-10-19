@@ -37,7 +37,7 @@ A kiosk can have a render server (`kiosk.py --serve`, named in the kiosk's `~/.c
 - **`-I` mode:** both scripts run with `python3 -I`, which leaves their own folder off `sys.path`, so they add it back themselves. Keep that.
 - **Secrets:** never put a password on a command line or in the repo. Take them from a hidden prompt or an environment variable and pass them over stdin (see `deploy/as-root.sh`).
 - **Temperatures are °C.** The forecast is fetched in Celsius, and `kit.warmth()` takes °C.
-- **Colours are Nomads Galaxy tokens** (`kit.py`, from the Nomads Galaxy brand tokens). Don't invent new ones. Partner owners like Positron 3D and Hive76 aren't drawn in Warp Cyan.
+- **Colours are Nomads Galaxy tokens** (`kit.py`, from the Nomads Galaxy brand tokens). Don't invent new ones. On the GitHub page, only the first owner is drawn in Warp Cyan.
 - **Transitions** (`catalog/transitions/`, one file per theme with a `frames(canvas)` generator) work on the framebuffer's raw bytes through `canvas.py`, never Pillow per frame. Each copy costs about 45 us on the Zero whatever its size, so count copies, not bytes: whole rows go in one, and a frame should stay under ~600. Build sprites once, at import, and `stamp()` anything that's stopped moving so it isn't redrawn every frame. Time a new one on the Pi before shipping it. Never flash the whole screen: no full-screen flicker faster than about 3 times a second (it's a seizure risk).
 - **Fonts:** text uses `kiosk/fonts/Uni2-VGA16.psf.gz`. Check a glyph exists before you use it (`kit.FONT`).
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""kiosk: the Hive76 kiosk's display. It shows the pages in playlist.json one after another on the 1920x515 bar,
+"""kiosk: the kiosk's display. It shows the pages in playlist.json one after another on the 1920x515 bar,
 drawn straight to the framebuffer (16-bit RGB565, /dev/fb0), with tty1 in graphics mode so the console stays out of
 the way. If another console takes the screen it stops drawing, and repaints everything once tty1 is back.
 

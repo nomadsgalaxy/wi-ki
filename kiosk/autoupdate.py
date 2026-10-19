@@ -3,7 +3,7 @@
 (systemd/kiosk-autoupdate.*); the git work and the tests run as the kiosk user.
 
 Each run:
-1. fetches main into the Pi's clone (~/HiveKiosk, pulled over https: the repo is public) and stops if nothing changed
+1. fetches main into the Pi's clone (~/wi-ki, pulled over https: the repo is public) and stops if nothing changed
    since the last commit it applied;
 2. puts the new code together beside the running one and runs the smoke test on it (every page loads and draws; the
    full check is too slow for a Zero, so that runs before pushing), and stops if it fails (and won't try that commit
@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves our
 import packs  # noqa: E402
 
 HOME = "/home/kiosk"
-CLONE, LIVE = f"{HOME}/HiveKiosk", f"{HOME}/kiosk"
+CLONE, LIVE = f"{HOME}/wi-ki", f"{HOME}/kiosk"
+OLD_CLONE = f"{HOME}/HiveKiosk"   # the clone's name until October 2026: moved to CLONE on the next run
 STATE = f"{HOME}/.cache/kiosk"
 APPLIED, REFUSED = f"{STATE}/applied-commit", f"{STATE}/refused-commit"
 UNITS = "/etc/systemd/system"
@@ -150,6 +151,8 @@ if __name__ == "__main__":
         sys.exit(assemble(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."), sys.argv[2]))
     if os.geteuid() != 0:
         sys.exit("autoupdate.py runs as root (systemd does that); try: sudo python3 -I ~/kiosk/autoupdate.py")
+    if os.path.isdir(OLD_CLONE) and not os.path.exists(CLONE):
+        os.rename(OLD_CLONE, CLONE); log(f"moved {OLD_CLONE} to {CLONE}")
     if sys.argv[1:] == ["--status"]:
         status()
     elif len(sys.argv) == 1:

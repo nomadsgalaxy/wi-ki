@@ -99,18 +99,18 @@ def draw(now, data, note=None):
 
 
 SAMPLE = {"updated": "2026-10-15T03:28:36+00:00", "github": {"error": None, "items": [
-    {"owner": "Nomads Galaxy", "login": "nomadsgalaxy", "prs": 9, "issues": 3, "repos": [
-        {"name": "desk-kiosk", "private": True, "pushed": "2026-10-15T03:23:14Z", "commit": "GitHub and agents pages"},
-        {"name": "galacticmap", "private": False, "pushed": "2026-10-15T03:03:19Z",
+    {"owner": "Octo Org", "login": "octo-org", "prs": 9, "issues": 3, "repos": [
+        {"name": "kiosk", "private": True, "pushed": "2026-10-15T03:23:14Z", "commit": "GitHub and agents pages"},
+        {"name": "star-map", "private": False, "pushed": "2026-10-15T03:03:19Z",
          "commit": "Spreadsheets: Excel-compatible formulas, units and typed variables, and a very long tail that gets cut"},
-        {"name": "PrintTracking", "private": True, "pushed": "2026-10-14T14:01:30Z", "commit": "Accept October 14 metadata"},
-        {"name": "arch-systemsync", "private": True, "pushed": "2026-10-14T04:50:19Z", "commit": "Move galacticmap repo"},
-        {"name": "SM4L", "private": False, "pushed": "2026-10-10T02:59:42Z", "commit": "Document HF5.9"}]},
-    {"owner": "Positron 3D", "login": "Positron3D", "prs": 13, "issues": 29, "repos": [
-        {"name": "PosiWebsite", "private": False, "pushed": "2026-10-09T02:08:29Z", "commit": "Merge pull request #12"},
+        {"name": "print-log", "private": True, "pushed": "2026-10-14T14:01:30Z", "commit": "Accept October 14 metadata"},
+        {"name": "dotfiles", "private": True, "pushed": "2026-10-14T04:50:19Z", "commit": "Move star-map repo"},
+        {"name": "firmware", "private": False, "pushed": "2026-10-10T02:59:42Z", "commit": "Document 5.9"}]},
+    {"owner": "Acme Makers", "login": "acme", "prs": 13, "issues": 29, "repos": [
+        {"name": "website", "private": False, "pushed": "2026-10-09T02:08:29Z", "commit": "Merge pull request #12"},
         {"name": "printer-klipper-config-with-a-name-too-long", "private": False, "pushed": "2026-10-08T02:22:14Z",
          "commit": "Merge pull request #39"}]},
-    {"owner": "Hive76", "login": "hive76", "prs": 0, "issues": 2, "repos": []}]}}
+    {"owner": "Makerspace", "login": "makerspace", "prs": 0, "issues": 2, "repos": []}]}}
 
 
 class Page(Simple):

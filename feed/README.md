@@ -18,7 +18,7 @@ The GitHub page shows three owners: the account `gh` is logged in as and its fir
 set `DESKFEED_OWNERS` to logins, each with the name to show after an `=` if you like, before running `install.sh`:
 
 ```
-DESKFEED_OWNERS="nomadsgalaxy=Nomads Galaxy,Positron3D=Positron 3D,hive76=Hive76" feed/install.sh
+DESKFEED_OWNERS="octo-org=Octo Org,acme=Acme Makers,makerspace=Makerspace" feed/install.sh
 ```
 
 ```

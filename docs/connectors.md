@@ -7,7 +7,7 @@ calendar. Those need a **connector**: something on another machine that sends th
 Today there are two kinds: the **desktop feeds** and the **calendar's event sources**.
 
 > **Coming:** a general connector contract, so anything that can serve JSON can feed a page, and a **Home
-> Assistant** page that reads your entities with a token, set up and tested from the setup page (board topic 103).
+> Assistant** page that reads your entities with a token, set up and tested from the setup page.
 > Setting up a connector still uses a terminal on the desktop today, but never on the kiosk.
 
 ## A desktop
@@ -49,7 +49,7 @@ one thing.
 2. **Pick your GitHub owners,** if you want something other than your `gh` account and its first two orgs. Run step 1
    with them set:
    ```
-   DESKFEED_OWNERS="nomadsgalaxy=Nomads Galaxy,hive76" KIOSK_HOST=kiosk@<server> feed/install.sh
+   DESKFEED_OWNERS="octo-org=Octo Org,acme" KIOSK_HOST=kiosk@<server> feed/install.sh
    ```
    Each is a GitHub login, with the name to show after an `=` if you like. The page shows three.
 
@@ -82,7 +82,7 @@ There are two sources today:
   ```json
   {"output": "~/.cache/kiosk/events.json", "days": 14,
    "sources": [{"source": "recurring", "options": {"events": [
-     {"title": "Member Night", "weekday": "wednesday", "start": "19:00", "end": "22:00", "location": "Hive76"}]}}]}
+     {"title": "Open Night", "weekday": "wednesday", "start": "19:00", "end": "22:00", "location": "the workshop"}]}}]}
   ```
 - **`desk`:** the events on a desktop's KDE calendars, the ones its Event Calendar widget shows. They come in with the
   desktop feed above (titles, times and places only, never descriptions):
@@ -100,7 +100,7 @@ write:
 ```json
 {"updated": "2026-10-14T15:00:00",
  "events": [{"title": "Open House", "start": "2026-10-16T19:00", "end": "2026-10-16T22:00", "all_day": false,
-             "location": "Hive76"}]}
+             "location": "the workshop"}]}
 ```
 
 Times are local. Use a plain date as `start` for an all-day event. Only `title` and `start` are required.

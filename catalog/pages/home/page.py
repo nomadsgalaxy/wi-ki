@@ -14,8 +14,8 @@ from kit import SCREEN, O, W, G, D, A, BG, RULE, text, clock, packed
 
 TITLES = {"weather": "Weather", "github": "GitHub", "agents": "Agents", "nowplaying": "Now Playing", "system": "System",
           "radar": "Flight Radar", "calendar": "Calendar", "cfradar": "Cloudflare Radar", "septa": "SEPTA",
-          "halflife3": "Half-Life 3", "flyers": "Flyers", "around": "Around Hive76", "around-311": "Hive76 · 311",
-          "around-building": "Hive76 · Building", "around-bikes": "Hive76 · Bikes", "sports": "Philly Sports"}
+          "halflife3": "Half-Life 3", "flyers": "Flyers", "around": "Around", "around-311": "Around · 311",
+          "around-building": "Around · Building", "around-bikes": "Around · Bikes", "sports": "Sports"}
 SLOW = os.uname().machine.startswith("arm")
 COLS, TOP, GAP, MARGIN = 5, 64, 14, 20
 TILE_BG, TILE_EDGE = (20, 24, 40), (52, 58, 80)

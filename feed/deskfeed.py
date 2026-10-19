@@ -188,12 +188,12 @@ def check():
                                              "defaultBranchRef": None}]}},
           "p0": {"issueCount": 2}, "i0": {"issueCount": 5}, "o1": None, "p1": {"issueCount": 0}, "i1": {"issueCount": 0},
           "o2": {"repositories": {"nodes": []}}, "p2": {"issueCount": 1}, "i2": {"issueCount": 3}}
-    three = [("nomadsgalaxy", "Nomads Galaxy"), ("Positron3D", "Positron 3D"), ("hive76", "Hive76")]
-    assert owners("nomadsgalaxy=Nomads Galaxy, Positron3D=Positron 3D,hive76=Hive76,more") == three
+    three = [("octo-org", "Octo Org"), ("acme", "Acme Makers"), ("makerspace", "Makerspace")]
+    assert owners("octo-org=Octo Org, acme=Acme Makers,makerspace=Makerspace,more") == three
     assert owners('x") { evil }, ok') == [("ok", "ok")] and owners(" , ") == [], "only GitHub's characters go in the query"
     me = {"viewer": {"login": "me", "name": None, "organizations": {"nodes": [{"login": "a", "name": "A"}] * 3}}}
     assert owners("", lambda: me) == [("me", "me"), ("a", "A"), ("a", "A")], "unset: the account and its first orgs"
-    assert 'user:hive76"' in github_query(three)
+    assert 'user:makerspace"' in github_query(three)
     g = github_parse(gh, three)
     assert g[0]["repos"][0] == {"name": "desk-kiosk", "private": True, "pushed": "2026-10-15T03:23:14Z", "commit": "Celsius"}
     assert g[0]["repos"][1]["commit"] == "" and g[1]["repos"] == [] and g[2]["issues"] == 3, g

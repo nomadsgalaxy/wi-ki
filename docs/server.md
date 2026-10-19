@@ -10,7 +10,7 @@ way, and the same server can show the kiosk in a browser too.
 >
 > **Coming:** one server for any number of kiosks, with "Use a server" on the kiosk's setup page and a pairing code
 > instead of copying a key, every kiosk's settings and backups in one place on the server, and an encrypted link
-> between them (board topic 103). This guide changes to match when that lands.
+> between them. This guide changes to match when that lands.
 
 ## What you need
 
@@ -68,7 +68,7 @@ way, and the same server can show the kiosk in a browser too.
 
 Each kiosk gets its own `kiosk-serve` process, with its own port and its own home folder, so its own settings,
 caches and installed pages. They share one copy of the code, and the server's update keeps it current for all of
-them. Hive76's TKiosk-Server, a Pi 4 with 8 GB, runs its kiosks this way.
+them. A Pi 4 with 8 GB runs several kiosks this way.
 
 1. **Set up the server as above** for the first kiosk. Its `kiosk-serve` uses `/home/kiosk` and port 7676.
 

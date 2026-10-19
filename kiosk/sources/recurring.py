@@ -1,7 +1,7 @@
-"""recurring: events that happen on the same weekday every week, like Member Night and Open House.
+"""recurring: events that happen on the same weekday every week, like an open night every Wednesday.
 
 Options (in eventsync.json): events, a list of
-  {"title": "Member Night", "weekday": "wednesday", "start": "19:00", "end": "22:00", "location": "Hive76"}
+  {"title": "Open Night", "weekday": "wednesday", "start": "19:00", "end": "22:00", "location": "the workshop"}
 Only title, weekday and start are required.
 """
 from datetime import datetime, timedelta

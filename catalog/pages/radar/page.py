@@ -404,8 +404,8 @@ def check():
         == ROUTES["AAL322"] and route_of({"origin": {"iata_code": "MIA"}, "destination": {"iata_code": None}}) == {} \
         and route_of(None) == {} and route_of({"origin": "MIA"}) == {}, "a route only when both ends are airport codes"
     assert [p["callsign"] for p in SAMPLE] == ["AAL322", "SKQ51", "GTI8865", "N139MH", "ICE686"], "nearest first, no position no blip"
-    town = {"places": [["Wilmington", "city", 70000, 39.74, -75.55]], "airports": [["ILG", "Wilmington Airport", 39.6787, -75.6065]]}
-    assert [l[2] for l in basemap(town, 39.71, -75.62, 25)[1]] == ["ILG", "Wilmington"], "airports first, then towns"
+    town = {"places": [["Riverton", "city", 70000, 39.74, -75.55]], "airports": [["RVT", "Riverton Airport", 39.6787, -75.6065]]}
+    assert [l[2] for l in basemap(town, 39.71, -75.62, 25)[1]] == ["RVT", "Riverton"], "airports first, then towns"
     lines = basemap(town, 39.71, -75.62, 25)[2]
     shower = Image.new("RGBA", lines.size); ImageDraw.Draw(shower).rectangle((0, 0, 9, 9), fill=mix(O, 0.18) + (255,))
     wet = with_rain(lines, shower)

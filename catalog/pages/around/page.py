@@ -1,5 +1,6 @@
-"""The Around Hive76 page: the blocks around the space, from the City of Philadelphia's open data and Indego. A map of
-the streets around Hive76 (1821 E. Hagert St., Kensington) on the left, and on the right whichever view is up:
+"""The Around page: the blocks around a place, from its city's open data and bike share (by default Philadelphia's
+City Hall, with the City of Philadelphia's data and Indego). A map of the streets around it on the left, and on the
+right whichever view is up:
 
   all        the overview: this week's 311 reports, the month's building permits, the nearest Indego bikes
   reports    the 311 reports within RADIUS this week, newest first: when, what, where, open or closed
@@ -7,18 +8,18 @@ the streets around Hive76 (1821 E. Hagert St., Kensington) on the left, and on t
   bikes      the nearest Indego stations: bikes, e-bikes, open docks, and how far a walk
 
 The map shows the view's things: 311 reports as orange dots, permits as light blue squares, Indego stations with their
-bikes, Hive76 as an orange hexagon. Touch a tab along the top to change the view (see kiosk.py's touch); with nobody
+bikes, the middle as an orange hexagon. Touch a tab along the top to change the view (see kiosk.py's touch); with nobody
 touching, it goes back to its own view after a while. A screen without touch just shows the page's own view, so list
 the views as pages of their own as well: {"page": "around", "name": "bikes", "options": {"view": "bikes"}}.
 
 Data: 311 and permits come from the city's Carto SQL API (phl.carto.com, no key) every 15 minutes, Indego's live station
 feed (GBFS, no key) every minute, and the streets from OpenStreetMap's Overpass API once, cached on disk. Everything
-goes in caches every renderer shares, and a failed fetch keeps the last one. Hive76's own colours, and only this page
+goes in caches every renderer shares, and a failed fetch keeps the last one. The page has its own colours, and only it
 uses them.
 
-Options (in playlist.json): view (default all); lat, lon, the middle (default Hive76); radius, in metres (default 1000).
+Options (in playlist.json): view (default all); lat, lon, the middle (default Philadelphia's City Hall); radius, in metres (default 1000).
 city, one of CITIES, sets everything below (and the middle) for a city we've tried, and any option given still wins.
-Another city's: place and area, for the title and the spot in the middle (default HIVE76 and Kensington); bikes, its
+Another city's: place and area, for the title and the spot in the middle (default CITY HALL and Philadelphia); bikes, its
 bike share's GBFS feed, the folder with station_information.json in it, or null for none (default Indego's), and
 bike_share, its name; reports, "phl-carto", the address of an Open311 GeoReport v2 server (its open311/v2 folder,
 the standard most cities' 311 systems publish), or null; permits, "phl-carto" or null. Streets come from OpenStreetMap
@@ -33,7 +34,7 @@ from kit import SCREEN, MAPS, A, text, clock, packed, local, freshness
 ORANGE, WHITE, GREY, DARK, BLUE, LIGHT = (246, 145, 31), (235, 235, 235), (170, 170, 170), (85, 85, 85), (60, 120, 255), (120, 200, 255)
 BG, RULE, PANEL = (12, 14, 20), (40, 44, 56), (22, 25, 34)
 ROAD_MAJOR, ROAD, RAIL = (78, 84, 104), (40, 44, 58), (104, 64, 26)
-HIVE76 = (39.986727, -75.130526)
+MIDDLE = (39.9524, -75.1636)   # Philadelphia's City Hall: the default middle
 CARTO = "https://phl.carto.com/api/v2/sql"
 INDEGO = "https://gbfs.bcycle.com/bcycle_indego/"
 OVERPASS = ("https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter")
@@ -48,7 +49,7 @@ UA = {"User-Agent": "wi-ki around (github.com/nomadsgalaxy/wi-ki)"}
 # cities whose feeds answered when we tried them (2026-10-19): the middle is city hall. Only Philadelphia's and San
 # Francisco's 311 did (Chicago's and Boston's Open311 servers were down), so the rest get the map and their bikes
 CITIES = {
-    "philadelphia": dict(lat=HIVE76[0], lon=HIVE76[1], place="HIVE76", area="Kensington", bikes=INDEGO, bike_share="INDEGO",
+    "philadelphia": dict(lat=MIDDLE[0], lon=MIDDLE[1], place="CITY HALL", area="Philadelphia", bikes=INDEGO, bike_share="INDEGO",
                          reports=PHL, permits=PHL),
     "san-francisco": dict(lat=37.7793, lon=-122.4193, place="CITY HALL", area="San Francisco",
                           bikes="https://gbfs.lyft.com/gbfs/2.3/bay/en/", bike_share="BAY WHEELS",
@@ -243,7 +244,7 @@ def hexagon(d, x, y, r, fill, outline):
               fill=fill, outline=outline)
 
 
-WHERE = {"place": "HIVE76", "area": "Kensington", "bike_share": "INDEGO", "city": "City of Philadelphia"}
+WHERE = {"place": "CITY HALL", "area": "Philadelphia", "bike_share": "INDEGO", "city": "City of Philadelphia"}
 
 
 def credit_for(view, where=WHERE):
@@ -403,7 +404,7 @@ def read(path):
 
 
 class Page:
-    """the blocks around Hive76, as a page of the kiosk's cycle"""
+    """the blocks around a place, as a page of the kiosk's cycle"""
     name, seconds = "around", 30
 
     def __init__(self, view="all", lat=OWN, lon=OWN, radius=1000, data=None, place=OWN, area=OWN, bikes=OWN, bike_share=OWN,
@@ -519,12 +520,12 @@ SAMPLE = {"streets": {"roads": [[True, [[39.98, -75.14], [39.99, -75.12]]], [Fal
 def check():
     now = datetime(2026, 10, 15, 16, 10)
     for view, _ in VIEWS:
-        assert draw(now, view, *HIVE76, 1000, SAMPLE["streets"], SAMPLE["city"], SAMPLE["bikes"]).size == SCREEN, view
-        assert draw(now, view, *HIVE76, 1000, None, None, None).size == SCREEN, f"{view} before any data"
+        assert draw(now, view, *MIDDLE, 1000, SAMPLE["streets"], SAMPLE["city"], SAMPLE["bikes"]).size == SCREEN, view
+        assert draw(now, view, *MIDDLE, 1000, None, None, None).size == SCREEN, f"{view} before any data"
     assert tally(SAMPLE["city"]["reports"] * 2, "service_name")[0][1] == 2
     assert when("2026-10-01T10:00:00Z", now) == "Oct 1" and when("2026-10-15T15:10:28Z", now).endswith(("a", "p"))
     assert when("2026-10-14T22:23:15Z", now)[:4] in ("Wed ", "Thu ") or ":" in when("2026-10-14T22:23:15Z", now)
-    e, n = metres(*HIVE76, HIVE76[0] + 0.001, HIVE76[1] + 0.001)
+    e, n = metres(*MIDDLE, MIDDLE[0] + 0.001, MIDDLE[1] + 0.001)
     assert 80 < e < 90 and 105 < n < 115, "a thousandth of a degree is about 85 m east and 111 m north here"
     # a row with no geometry or time doesn't blank the page
     holes = {"reports": SAMPLE["city"]["reports"] + [{"service_name": "x", "status": "Open", "t": "2026-10-15T15:00:00Z", "address": "y",
@@ -532,7 +533,7 @@ def check():
              "permits": SAMPLE["city"]["permits"] + [{"permittype": "p", "typeofwork": None, "t": "2026-10-15T15:00:00Z", "address": None, "lat": float("nan"), "lon": None}],
              "fetched": SAMPLE["city"]["fetched"]}
     for view, _ in VIEWS:
-        assert draw(now, view, *HIVE76, 1000, SAMPLE["streets"], holes, SAMPLE["bikes"]).size == SCREEN, f"{view} with holes"
+        assert draw(now, view, *MIDDLE, 1000, SAMPLE["streets"], holes, SAMPLE["bikes"]).size == SCREEN, f"{view} with holes"
     assert spot({"lat": None, "lon": 1}) is None and spot({"lat": "x", "lon": 1}) is None and spot({"lat": 1, "lon": 2}) == (1, 2)
     # odd data is cleaned before it's drawn: wrong types, missing fields, huge numbers, empty lists, text of any length
     odd = {"city": {"reports": [{"service_name": None, "t": "2026-10-15T15:00:00Z", "lat": "x", "lon": 1e9}, {"t": 12}, "x"] + SAMPLE["city"]["reports"],
@@ -548,8 +549,8 @@ def check():
         assert Page(view=view, data=odd).background(now)[1].size == SCREEN, f"{view} with odd data"
         assert Page(view=view, data=[]).background(now)[1].size == SCREEN, f"{view} with data that isn't a dict"
     # the age: updated hh:mm, then amber when old
-    fresh, old = (draw(now, "all", *HIVE76, 1000, None, SAMPLE["city"], SAMPLE["bikes"]),
-                  draw(now, "all", *HIVE76, 1000, None, dict(SAMPLE["city"], fetched="2026-10-15T09:00:00"), SAMPLE["bikes"]))
+    fresh, old = (draw(now, "all", *MIDDLE, 1000, None, SAMPLE["city"], SAMPLE["bikes"]),
+                  draw(now, "all", *MIDDLE, 1000, None, dict(SAMPLE["city"], fetched="2026-10-15T09:00:00"), SAMPLE["bikes"]))
     assert fresh.tobytes() != old.tobytes() and freshness(datetime(2026, 10, 15, 16, 0), now, STALE_CITY) == ("updated 4:00 PM", False)
     # a fetch that fails isn't asked for again until RETRY has passed; lat and lon are numbers before they reach the SQL
     try:
@@ -588,17 +589,17 @@ def check():
     assert len({Page().caches()[0][0], Page(radius=500).caches()[0][0], Page(lat=40.0).caches()[0][0], Page(lon=-75.2).caches()[0][0]}) == 4
     assert Page(lat=40.0).caches()[1][0] != Page().caches()[1][0]
     # a station with no status is unknown, not 0 bikes and open; a corrupt streets cache is fetched again
-    feed = {"station_information.json": {"data": {"stations": [{"station_id": "1", "name": "A", "lat": HIVE76[0], "lon": HIVE76[1]}]}},
+    feed = {"station_information.json": {"data": {"stations": [{"station_id": "1", "name": "A", "lat": MIDDLE[0], "lon": MIDDLE[1]}]}},
             "station_status.json": {"data": {"stations": []}}}
     real_get = globals()["get"]; globals()["get"] = lambda url, *a, **k: feed[url.rsplit("/", 1)[1]]
     try:
-        st = fetch_bikes(*HIVE76)["stations"][0]
+        st = fetch_bikes(*MIDDLE)["stations"][0]
     finally:
         globals()["get"] = real_get
     assert st["bikes"] is None and st["docks"] is None and st["open"] is None and count(st["bikes"]) == "?"
     unknown = dict(SAMPLE["bikes"], stations=[st] + SAMPLE["bikes"]["stations"])
     for view in ("all", "bikes"):
-        assert draw(now, view, *HIVE76, 1000, None, SAMPLE["city"], unknown).tobytes() != draw(now, view, *HIVE76, 1000, None, SAMPLE["city"],
+        assert draw(now, view, *MIDDLE, 1000, None, SAMPLE["city"], unknown).tobytes() != draw(now, view, *MIDDLE, 1000, None, SAMPLE["city"],
             dict(unknown, stations=[dict(st, bikes=0, ebikes=0, docks=0, open=True)] + SAMPLE["bikes"]["stations"])).tobytes(), "unknown isn't 0"
     real_streets = globals()["STREETS"]
     globals()["STREETS"] = os.path.join(folder, "s-{lat}_{lon}.json")
@@ -623,7 +624,7 @@ def check():
     globals()["credit_for"] = lambda view, where=WHERE: (got.append(view), real_credit(view, where))[1]
     try:
         for view, _ in VIEWS:
-            draw_map(view, *HIVE76, 1000, None, None, None)
+            draw_map(view, *MIDDLE, 1000, None, None, None)
     finally:
         globals()["credit_for"] = real_credit
     assert got == [v for v, _ in VIEWS], "the map's credit is the view's own"
@@ -666,7 +667,7 @@ def check():
     assert sf.where["area"] == "San Francisco" and sf.where["city"] == "mobile311.sfgov.org" and sf.where["bike_share"] == "BAY WHEELS"
     assert (mine.lat, sf.lon, mine.sources["bikes"], mine.sources["reports"]) == (37.8, -122.4193, None, sf.sources["reports"]), \
         "a city fills in what the playlist doesn't say, and what it says wins"
-    assert Page(city="philadelphia").caches()[0][0] == Page().caches()[0][0] and Page().where["place"] == "HIVE76", "Philly as before"
+    assert Page(city="philadelphia").caches()[0][0] == Page().caches()[0][0] and Page().where["place"] == "CITY HALL", "Philly as before"
     assert all(c["bikes"] is None or c["bikes"].startswith("https://") for c in CITIES.values())
     for bad in ({"bikes": "http://gbfs.example.org/"}, {"reports": "ftp://x"}, {"permits": "https://permits.example.org"}, {"city": "atlantis"}):
         try:

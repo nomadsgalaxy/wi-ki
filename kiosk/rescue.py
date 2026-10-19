@@ -198,16 +198,16 @@ def write_status(info):
 
 def check():
     assert fields(r"wlan0:wifi:connected:Hive\:76") == ["wlan0", "wifi", "connected", "Hive:76"], "nmcli's escaped colons"
-    assert state("wlan0:wifi:connected:Hive76-IoT\nlo:loopback:connected (externally):lo\n") == (True, True)
+    assert state("wlan0:wifi:connected:Home-IoT\nlo:loopback:connected (externally):lo\n") == (True, True)
     assert state("wlan0:wifi:connected:kiosk-rescue\n") == (True, False), "its own hotspot isn't being online"
     assert state("wlan0:wifi:disconnected:--\n") == (True, False) and state("eth0:ethernet:connected:x\n") == (False, False)
-    assert networks("Hive76:70:WPA2\nHive76:40:WPA2\nCafe:55:\n:30:WPA2\n") == [("Hive76", 70, True), ("Cafe", 55, False)]
-    k = keyfile("Hive76", "Hive76", "secret-pass")
+    assert networks("Home:70:WPA2\nHome:40:WPA2\nCafe:55:\n:30:WPA2\n") == [("Home", 70, True), ("Cafe", 55, False)]
+    k = keyfile("Home", "Home", "secret-pass")
     assert "psk=secret-pass" in k and "mode=infrastructure" in k and "autoconnect-retries=0" in k and "method=auto" in k
     ap = keyfile(HOTSPOT, "kiosk-setup", "abcdefghjk", ap=True)
     assert "mode=ap" in ap and f"address1={ADDRESS}/24" in ap and "autoconnect=false" in ap and "method=shared" in ap
-    r = Rescue("kiosk"); r.seen = [("Hive76", 70, True)]; r.note = "<b>"
-    assert "Hive76 (70%)" in r.page() and "&lt;b&gt;" in r.page(), "the page lists what it saw, and escapes"
+    r = Rescue("kiosk"); r.seen = [("Home", 70, True)]; r.note = "<b>"
+    assert "Home (70%)" in r.page() and "&lt;b&gt;" in r.page(), "the page lists what it saw, and escapes"
     print("rescue: ok")
 
 

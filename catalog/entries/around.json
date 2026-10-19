@@ -2,7 +2,7 @@
  "name": "around",
  "kind": "page",
  "home": "public",
- "about": "the blocks around a place: 311 reports, permits and bike-share stations (Hive76 and Philadelphia's open data by default, a few other cities ready to pick, or any city's Open311 and GBFS feeds)",
+ "about": "the blocks around a place: 311 reports, permits and bike-share stations (Philadelphia's open data by default, a few other cities ready to pick, or any city's Open311 and GBFS feeds)",
  "found": {
   "main": "5ce517"
  },
@@ -32,8 +32,8 @@
   "lat": null,
   "lon": null,
   "radius": 1000,
-  "place": "HIVE76",
-  "area": "Kensington",
+  "place": "CITY HALL",
+  "area": "Philadelphia",
   "bikes": null,
   "bike_share": "INDEGO",
   "reports": null,
@@ -46,7 +46,7 @@
    "of": [
     [
      "",
-     "Philadelphia (Hive76)"
+     "Philadelphia"
     ],
     [
      "san-francisco",

@@ -3,14 +3,14 @@
     "KPlugin": {
         "Authors": [
             {
-                "Name": "Anthony"
+                "Name": "Wi-Ki"
             }
         ],
         "Category": "System Information",
         "Description": "Pick which page the desk kiosk shows",
         "EnabledByDefault": true,
         "Icon": "video-display",
-        "Id": "org.anthony.deskkiosk",
+        "Id": "org.wiki.deskkiosk",
         "License": "MIT",
         "Name": "Desk Kiosk",
         "Version": "1.0"

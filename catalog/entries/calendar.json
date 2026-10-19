@@ -18,7 +18,7 @@
  "settings": {
   "events": "~/.cache/kiosk/events.json",
   "forecast": "~/.cache/weather.json",
-  "title": "HIVE76"
+  "title": null
  },
  "form": {
   "title": {

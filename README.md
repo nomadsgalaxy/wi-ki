@@ -1,6 +1,6 @@
 # Wi-Ki
 
-Wide Kiosk: the base OS and catalog for every kiosk I run, from my desks to the screens at Hive76. It's built for a Raspberry Pi Zero W on a 12.6" stretched bar screen (1920×515), and it cycles through pages: the weather, with a pixel-art Philly skyline that plays the real weather, time of day and season; a flight radar of what's overhead; my latest GitHub pushes; my agents and their usage; my desktop's CPU, GPU, memory and network; what's playing, with the cover, synced lyrics and a live spectrum; and more in the catalog.
+Wide Kiosk: the base OS and catalog for a kiosk on a stretched bar screen. It's built for a Raspberry Pi Zero W on a 12.6" stretched bar screen (1920×515), and it cycles through pages: the weather, with a pixel-art Philly skyline that plays the real weather, time of day and season; a flight radar of what's overhead; your latest GitHub pushes; your herdr agents and their usage; your desktop's CPU, GPU, memory and network; what's playing, with the cover, synced lyrics and a live spectrum; and more in the catalog.
 
 Every kiosk runs the same code. What makes one kiosk different from another lives on the kiosk itself, in `~/.config/kiosk/`, not in a branch.
 

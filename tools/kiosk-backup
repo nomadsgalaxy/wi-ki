@@ -9,7 +9,7 @@ backups, so one kiosk can never change another's.
 
 DIR is a checkout of the backups repo. KIOSK_SSH_OPTS adds options to every ssh, like the agent a timer should use.
 For example:
-  kiosk-backup ~/wi-ki-configs home-desk=kiosk@desk-kiosk.local home-server=kiosk@10.1.140.1
+  kiosk-backup ~/wi-ki-configs desk=kiosk@desk-kiosk.local server=kiosk@192.168.1.20
 
 Only settings, never secrets: the setup page's login (admin-login.json) and certificates (tls/) stay on the kiosk, the
 shared key in remote.json is left out, and a file that still looks like it holds a key or a token is refused. Restoring

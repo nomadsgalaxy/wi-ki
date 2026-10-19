@@ -16,7 +16,7 @@ import kit
 from . import FPS
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-# his performance, as Anthony timed it and then tightened to 10 s in all: "I'M ESCAPING TO THE ONE PLACE" alone for
+# his performance, 10 s in all: "I'M ESCAPING TO THE ONE PLACE" alone for
 # 2.2 s, "NOT CORRUPTED" 0.8 s, "BY CAPITALISM..." 0.8 s, then 2 s of withheld laughter, then he throws his head back
 # for SPACE!!!!
 LINES_AT = (0, 2.2, 3)  # seconds into his talking that each line of the banner comes up

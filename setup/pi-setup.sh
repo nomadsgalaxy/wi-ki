@@ -83,7 +83,7 @@ done
 fi
 
 # updates from GitHub: the repo is public, so the kiosk user clones it over https and needs no key
-runuser -u kiosk -- bash -c '[ -d ~/HiveKiosk/.git ] || git clone -q https://github.com/nomadsgalaxy/wi-ki.git ~/HiveKiosk' \
+runuser -u kiosk -- bash -c '[ -d ~/wi-ki/.git ] || git clone -q https://github.com/nomadsgalaxy/wi-ki.git ~/wi-ki' \
   || echo "Couldn't clone github.com/nomadsgalaxy/wi-ki; check the kiosk's network, then run this again."
 
 # the timers that come with the code (the event sync, auto-update), so deploy first

@@ -169,7 +169,7 @@ def draw(now, s, note=None, pi=(None, 0.0, None)):
 
 
 SAMPLE = {"cpu": 37.4, "threads": [92, 71, 64, 40, 33, 20, 15, 9, 8, 5, 4, 6, 80, 55, 13, 6, 3, 3, 1, 2, 3, 1, 3, 8],
-          "rx": 1234567, "tx": 18505, "iface": "enp5s0", "disk_used": 399, "disk_total": 987, "host": "Anthony-Desktop",
+          "rx": 1234567, "tx": 18505, "iface": "enp5s0", "disk_used": 399, "disk_total": 987, "host": "Desktop",
           "model": "Ryzen 9 9900X", "cpu_temp": 71.5, "disk_temp": 40.9,
           "gpu": {"name": "RTX 2070 SUPER", "util": 19.0, "temp": 53.0, "vram_used": 3.6, "vram_total": 8.0, "power": 54.6},
           "load": 2.41, "uptime": 517777, "mem_used": 19.1, "mem_total": 30.4, "swap_used": 21.3, "swap_total": 38.4,

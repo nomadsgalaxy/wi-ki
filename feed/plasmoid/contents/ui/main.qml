@@ -31,9 +31,9 @@ PlasmoidItem {
 
     readonly property var titles: ({ weather: "Weather", github: "GitHub", agents: "Agents", nowplaying: "Now Playing", system: "System",
                                      radar: "Flight Radar", calendar: "Calendar", cfradar: "Cloudflare Radar", septa: "SEPTA",
-                                     halflife3: "Half-Life 3", flyers: "Flyers", around: "Around Hive76",
-                                     "around-311": "Hive76 · 311", "around-building": "Hive76 · Building",
-                                     "around-bikes": "Hive76 · Bikes", home: "Home", sports: "Philly Sports" })
+                                     halflife3: "Half-Life 3", flyers: "Flyers", around: "Around",
+                                     "around-311": "Around · 311", "around-building": "Around · Building",
+                                     "around-bikes": "Around · Bikes", home: "Home", sports: "Sports" })
 
     function title(page) {
         return titles[page] || (page.charAt(0).toUpperCase() + page.slice(1));

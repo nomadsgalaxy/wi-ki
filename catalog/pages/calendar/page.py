@@ -6,14 +6,14 @@ date and weather. The page reads the file again whenever it changes, and so it d
 
   {"updated": "2026-10-14T15:00:00",
    "events": [{"title": "Open House", "start": "2026-10-16T19:00", "end": "2026-10-16T22:00",
-               "all_day": false, "location": "Hive76"}]}
+               "all_day": false, "location": "the workshop"}]}
 
 start and end are local times (America/New_York), or plain dates ("2026-10-24") for all-day events. Only title and
 start are required. A broken entry is skipped, and a missing or broken file is just a calendar with no events.
 
 Options (in playlist.json): events, the events file (default ~/.cache/kiosk/events.json); forecast, the weather
 page's forecast cache (default ~/.cache/weather.json), for each day's weather; title, a name to go before NEXT 14 DAYS
-(Hive's says HIVE76; without one the heading is just NEXT 14 DAYS).
+(a place's name, say STUDIO; without one the heading is just NEXT 14 DAYS).
 """
 import json, math, os
 from datetime import date, datetime, timedelta
@@ -65,7 +65,7 @@ def hour(t):
 
 
 def heading(title):
-    """the big heading, what follows it, and where the cursor goes after them: HIVE76 NEXT 14 DAYS, or with no title just
+    """the big heading, what follows it, and where the cursor goes after them: STUDIO NEXT 14 DAYS, or with no title just
     NEXT 14 DAYS"""
     big, small = (title, "NEXT 14 DAYS") if title else ("NEXT 14 DAYS", "")
     x = 24 + len(big) * 24 + (24 + len(small) * 16 if small else 0)
@@ -214,8 +214,8 @@ def _check(folder):
             assert draw(now, evs, bent).size == SCREEN
     mixed = events_from({"events": [{"title": "a", "start": "2026-10-24T14:00+00:00"}, {"title": "b", "start": "2026-10-24T09:00"}]})
     assert all(e["_start"].tzinfo is None for v in mixed.values() for e in v), "an offset start sorts with local ones"
-    assert heading(None) == ("NEXT 14 DAYS", "", (24 + 12 * 24 + 8, 24)) and heading("HIVE76")[2] == (24 + 6 * 24 + 24 + 12 * 16 + 8, 24)
-    assert Page(events=events, forecast=forecast, title="HIVE76").cursor == heading("HIVE76")[2]
+    assert heading(None) == ("NEXT 14 DAYS", "", (24 + 12 * 24 + 8, 24)) and heading("STUDIO")[2] == (24 + 6 * 24 + 24 + 12 * 16 + 8, 24)
+    assert Page(events=events, forecast=forecast, title="STUDIO").cursor == heading("STUDIO")[2]
 
 
 def preview(now=None):

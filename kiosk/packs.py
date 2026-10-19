@@ -4,7 +4,7 @@
 A kiosk comes with a small core (core.json) and installs the rest when someone asks, on its setup page:
 
   from the catalog   the pages and transitions in Wi-Ki's catalog, reviewed before they were merged. They come from the
-                     kiosk's own update clone (~/HiveKiosk), so they're always the version that goes with its code, and
+                     kiosk's own update clone (~/wi-ki), so they're always the version that goes with its code, and
                      autoupdate keeps them up to date with everything else. installed.json lists which.
   from a repo        anyone's, on GitHub: a wiki-pack.json and the page's folder (or the transition's .py) at the top of
                      the repo. Nobody has reviewed that code, and it runs as the kiosk's user, so the setup page says so
@@ -28,7 +28,9 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 HOME = os.path.expanduser("~")
 CONF = os.path.join(HOME, ".config", "kiosk")
 SHARE = os.path.join(HOME, ".local", "share", "kiosk")   # repo packs: pages/<name>/ and transitions/<name>.py
-CLONE = os.path.join(HOME, "HiveKiosk")                 # the update clone: the whole catalog, at the code's commit
+CLONE = os.path.join(HOME, "wi-ki")                     # the update clone: the whole catalog, at the code's commit
+if not os.path.isdir(CLONE) and os.path.isdir(os.path.join(HOME, "HiveKiosk")):   # its old name, till autoupdate moves it
+    CLONE = os.path.join(HOME, "HiveKiosk")
 REQUEST, STATUS = "packs-request.json", "packs-status.json"
 KINDS = {"page": "pages", "transition": "transitions"}
 NAME = re.compile(r"[a-z][a-z0-9_]{1,30}")
