@@ -18,6 +18,11 @@
  "settings": {
   "feed": "~/.cache/kiosk/desk.json"
  },
+ "form": {
+  "feed": {
+   "type": "internal"
+  }
+ },
  "ask": [
   "feed"
  ],
