@@ -7,6 +7,6 @@ Type=oneshot
 Environment=KIOSK_HOST=kiosk@kiosk.local
 Environment="DESKFEED_OWNERS="
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
-# The key can only write ~/.cache/kiosk/desk.json on the Pi (see README.md), so whatever command we send is ignored.
+# The key can only write ~/.cache/kiosk/desk.json on the Pi (see feed/README.md), so whatever command we send is ignored.
 # $$ is a literal $ for the shell; systemd would expand a single one itself.
 ExecStart=/bin/sh -c 'set -e; f=$$(mktemp); trap "rm -f $$f" EXIT; %h/wi-ki/feed/deskfeed.py > $$f; ssh -T -i %h/.ssh/desk-kiosk-feed -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 "$${KIOSK_HOST}" < $$f'
