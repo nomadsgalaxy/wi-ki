@@ -199,6 +199,10 @@ class Framebuffer:
         self.fb = open("/dev/fb0", "r+b"); self.mm = mmap.mmap(self.fb.fileno(), kit.SCREEN[0] * kit.SCREEN[1] * 2)
         self.tty = sys.stdin.fileno() if sys.stdin.isatty() else None
         if self.tty is not None:
+            # clear the console first, scrollback and all: whenever the display restarts (an update, an install, a
+            # save), the console shows for the 3 s until it's back, and old messages from runs long gone mustn't be
+            # what's on it then. Anything this run prints still shows when it ends.
+            os.write(self.tty, b"\033[H\033[2J\033[3J")
             fcntl.ioctl(self.tty, KDSETMODE, KD_GRAPHICS)   # the console stops drawing on top of us
 
     def visible(self):
