@@ -1,6 +1,6 @@
 # Wi-Ki: notes for coding agents
 
-What you need to work on the code without breaking the Pi. `README.md` covers running, setting up and deploying.
+What you need to work on the code without breaking the Pi. `docs/` covers setting up a kiosk, a render server and connectors, and `docs/develop.md` running, testing and deploying.
 
 ## The machine
 
