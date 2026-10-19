@@ -114,39 +114,24 @@ def local(iso):
 
 
 # --- the desktop feed, for the pages that show what's on my desktop (github, agents) --------------------------------
-class Feed:
-    """~/.cache/kiosk/desk.json, which feed/deskfeed.py writes from the desktop. Read again when it changes; a broken
-    or half-written file keeps the last good one."""
-    STALE = 15 * 60
+# ~/.cache/kiosk/desk.json, which feed/deskfeed.py writes from the desktop; the pages read it as a Simple page's file
+STALE = 15 * 60   # a feed older than this: the desktop's off, or off the network
 
-    def __init__(self, path="~/.cache/kiosk/desk.json"):
-        self.path, self.mtime, self.data = os.path.expanduser(path), None, None
 
-    def load(self):
-        mtime = os.path.getmtime(self.path) if os.path.exists(self.path) else None
-        if mtime != self.mtime:
-            self.mtime = mtime
-            try:
-                self.data = json.load(open(self.path))
-            except (OSError, ValueError):
-                pass
-        return self.data
+def fresh(feed):
+    """whether the desktop sent this feed in the last STALE seconds: when it hasn't, the rotation skips its pages"""
+    try:
+        return (datetime.now() - local(feed["updated"])).total_seconds() <= STALE
+    except (TypeError, KeyError, ValueError):
+        return False
 
-    def fresh(self):
-        """whether the desktop has sent the feed in the last STALE seconds: when it hasn't (it's off, or off the
-        network), the rotation skips its pages"""
-        data = self.load()
-        try:
-            return (datetime.now() - local(data["updated"])).total_seconds() <= self.STALE
-        except (TypeError, KeyError, ValueError):
-            return False
 
-    def note(self, now):
-        """(what to say about the feed's age, its colour), for the masthead"""
-        if not self.data:
-            return "waiting for the desktop", A
-        age = (now - local(self.data["updated"])).total_seconds()
-        return (f"no update for {round(age / 60)} min", A) if age > self.STALE else ("desktop · " + clock(local(self.data["updated"])), D)
+def note(feed, now):
+    """(what to say about the feed's age, its colour), for the masthead"""
+    if not feed:
+        return "waiting for the desktop", A
+    age = (now - local(feed["updated"])).total_seconds()
+    return (f"no update for {round(age / 60)} min", A) if age > STALE else ("desktop · " + clock(local(feed["updated"])), D)
 
 
 def drifter():
@@ -249,109 +234,219 @@ def unpack(img):
 
 
 class Simple:
-    """a page you make by saying what it shows: kit does the rest (the packing, fetching in the background, redrawing
-    only when something changes, and staying up when something fails). catalog/new/page.py is one to start from:
+    """a page you make by saying what it shows: kit does the rest. catalog/new/page.py is one to start from, and
+    docs/make.md the whole story. A page fills in what it needs:
 
-        class Page(kit.Simple):
-            name, seconds = "hello", 20
-            every = 600                        # optional: run fetch() this often (seconds), in the background
-            SAMPLE = {"title": "HELLO"}        # what fetch() returns, for check(), preview() and fuzz
-            def fetch(self): ...               # optional: get the data. It can be slow, and if it raises, the page
-                                               # keeps the data it had
-            def draw(self, img, now, data): ...   # draw on img, a screen-sized RGB picture cleared to BG
-            def moving(self, now, t, data): ...   # optional: [(RGB picture, (x, y))], every frame; keep them small
+      draw(img, now, data)    draw on img, an RGB picture the size of the screen, cleared to BG. It runs when
+                              redraw_on(now) changes (the minute, unless the page says: halflife3's is the day), new
+                              data comes, or redraw() asks. With no data yet, data is None: a draw
+                              that can't do anything with None gets the waiting screen
+      fetch() and every       get the data from the internet, every `every` seconds (it can be a property, to fetch
+                              more often while something's on). It runs in the background, and goes in a cache file
+                              that every renderer shares (`cache`, from the page and its options unless it says),
+                              so it's fetched once however many draw it. It has to be JSON. If it raises, the page
+                              keeps what it had, problem says why, and it tries again in a minute
+      file                    or: a JSON file something else writes (a desktop feed), read again when it changes
+      clean(data)             optional: the data as draw() wants it (types checked, missing parts filled in), or
+                              None if it's no good: then the page keeps the data it had. Read data is anyone's
+      moving(now, t, data)    what changes every frame: [(picture, (x, y))]. t is seconds since the page came up. RGB
+                              pictures are packed each frame, so keep them small, or hand back packed ones
+                              (kit.packed()), or raw packed bytes for whole rows at (0, y)
+      SAMPLE                  data to draw in check(), preview() and fuzz, without the network
 
-    draw() runs again when the minute changes or new data comes in. A page that fetches says it's waiting until its
-    first fetch works. One that can't draw shows why, and so does the console. Options are __init__'s arguments, as
-    on any page; there's no need to call this __init__.
-    shortcut: each renderer fetches for itself, with no shared cache file like sports' has; add one if a page's
-    service minds being asked twice."""
-    seconds, every, SAMPLE = 20, 0, None
-    data, failed, _bg, _busy, _got, _new = None, None, (None, None), False, 0.0, 0
+    and anything else a page has (fps, shapes, active(), touch(x, y), start(now)) works as on any page: see kiosk.py.
+    It also gets updated (when its data was fetched or written, a datetime, or None), age() (seconds since), problem
+    (why the last fetch failed: the exception, or None), redraw() (draw again on the next frame, after a touch say)
+    and load() (bring data up to date now, for active()).
+
+    Data that can't be drawn never replaces a picture: the page keeps showing the last data that drew, marked
+    CAN'T DRAW, and says why on the console. Options are __init__'s arguments, as on any page; no need to call this
+    __init__."""
+    seconds, every, file, cache, SAMPLE = 20, 0, None, None, None
+    mark = (SCREEN[0] - 24, SCREEN[1] - 40)   # where CAN'T DRAW goes (its right end), if that's in the way
+    data, updated, problem, failed = None, None, None, None
+    _bg, _good, _busy, _tried, _mtime, _turn, _fixed = (None, None), None, False, 0.0, None, 0, False
+    options = {}
+
+    def __init_subclass__(cls, **kw):
+        """note each page's options as it's made, for its cache's name"""
+        super().__init_subclass__(**kw)
+        init = cls.__dict__.get("__init__")
+        if init:
+            import functools, inspect
+            sig = inspect.signature(init)
+
+            @functools.wraps(init)
+            def noted(self, *args, **kwargs):
+                bound = sig.bind(self, *args, **kwargs); bound.apply_defaults()
+                self.options = dict(list(bound.arguments.items())[1:])
+                init(self, *args, **kwargs)
+            cls.__init__ = noted
+
+    @classmethod
+    def showing(cls, data, **options):
+        """the page with this data for good, never fetching or reading: for tests and previews"""
+        page = cls(**options)
+        page.data, page._fixed, page.updated = None if data is None else page.clean(data), True, datetime(2026, 10, 19, 9, 40)
+        return page
 
     def fetch(self):
         return None
 
+    def clean(self, data):
+        return data
+
     def draw(self, img, now, data):
-        text(img, (40, 40), self.name.upper(), O, scale=4)
+        text(img, (40, 40), type(self).__name__.upper(), O, scale=4)
 
     def moving(self, now, t, data):
         return []
 
-    def _fetch(self):
+    def redraw(self):
+        self._turn += 1
+
+    def redraw_on(self, now):
+        return now.minute
+
+    @property
+    def drawn(self):
+        """the picture showing now, packed (None before the first): for a page that moves parts of its own background"""
+        return self._bg[1]
+
+    def age(self):
+        """seconds since the data was fetched or written (infinity with none; 0 for showing()'s, which never ages)"""
+        if self._fixed:
+            return 0
+        return (datetime.now() - self.updated).total_seconds() if self.updated else float("inf")
+
+    def where(self):
+        """the file the data is read from: file, or the cache fetch() writes"""
+        if self.file:
+            return os.path.expanduser(self.file)
+        if self.cache:
+            return os.path.expanduser(self.cache)
+        import hashlib   # a cache for each set of options: two kiosks drawn on one server can want different teams
+        key = hashlib.sha1(json.dumps(self.options, sort_keys=True, default=repr).encode()).hexdigest()[:8]
+        return os.path.expanduser(f"~/.cache/kiosk/{type(self).name}-{key}.json")
+
+    def fetch_now(self, path=None):
+        """fetch() into the cache, here and now (load() does it in the background when it's time)"""
+        path = path or self.where()
         try:
-            self.data, self._new, self._got = self.fetch(), self._new + 1, time.time()
+            data = self.fetch()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path + ".tmp", "w") as f:
+                json.dump(data, f)
+            os.replace(path + ".tmp", path)   # whole, or not at all: another renderer may be reading it
+            self.problem = None
         except Exception as e:
+            self.problem = e
             print(f"{self.name}: can't fetch: {type(e).__name__}: {e}", flush=True)
-            self._got = time.time() - max(0, self.every - 60)   # try again in a minute
         finally:
-            self._busy = False
+            self._tried, self._busy = time.time(), False
+
+    def load(self):
+        """fetch when the cache is old (another renderer may have just done it), and read it, or file, when it changes.
+        background() does this every frame; active() can too, to decide on the latest data"""
+        if self._fixed or not (self.file or self.every):
+            return
+        path = self.where()
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = None
+        every = self.every
+        if not self.file and every and not self._busy:
+            wait = every if self.problem is None else min(every, 60)   # a failure tries again in a minute
+            if (mtime is None or time.time() - mtime >= every) and time.time() - self._tried >= wait:
+                self._busy = True
+                threading.Thread(target=self.fetch_now, args=(path,), daemon=True).start()
+        if mtime != self._mtime:
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                self._mtime, data = mtime, self.clean(data)
+                if data is not None:   # data that's no good keeps what it had
+                    self.data, self.updated = data, datetime.fromtimestamp(mtime)
+            except (OSError, ValueError, TypeError):
+                pass   # gone, or half written: keep the last, and look again next time
 
     def picture(self, now, data, safe=True):
-        """the page with data, as an RGB picture. safe: if draw() fails, the picture says why instead of raising"""
+        """the page with data, as an RGB picture. safe: if draw() fails, the last picture that drew, marked (or the
+        waiting screen, with no data yet), instead of raising"""
         img = Image.new("RGB", SCREEN, BG)
-        if data is None and self.every:
-            text(img, (40, 40), "WAITING FOR DATA…", G, scale=3)
-            return img
         try:
-            self.failed = None
             self.draw(img, now, data)
+            self.failed = None
+            return img
         except Exception as e:
+            if data is None:   # nothing to draw yet, and the page doesn't say so itself
+                img = Image.new("RGB", SCREEN, BG)
+                text(img, (40, 40), "WAITING FOR DATA…", G, scale=3)
+                return img
             if not safe:
                 raise
-            self.failed = f"{type(e).__name__}: {e}"
-            print(f"{self.name}: can't draw: {self.failed}", flush=True)
-            img = Image.new("RGB", SCREEN, BG)
-            text(img, (40, 40), "CAN'T DRAW", ERROR, scale=3)
-            text(img, (40, 100), self.failed[:SCREEN[0] // 16 - 5], G)
-        return img
+            failed = f"{type(e).__name__}: {e}"
+            print(f"{self.name}: can't draw: {failed}", flush=True)
+            img = self._good.copy() if self._good else self.picture(now, None)   # or the page with no data yet
+            self.failed = failed
+            text(img, self.mark, "CAN'T DRAW THE LATEST DATA", A, right=True)
+            return img
 
     def start(self, now):
         pass
 
     def background(self, now):
-        if self.every and not self._busy and time.time() - self._got >= self.every:
-            self._busy = True
-            threading.Thread(target=self._fetch, daemon=True).start()
-        key = (now.replace(second=0, microsecond=0), self._new)
+        self.load()
+        key = (self.redraw_on(now), self._mtime, self._turn, id(self.data), repr(self.problem))
         if key != self._bg[0]:
-            self._bg = (key, packed(self.picture(now, self.data)))
+            img = self.picture(now, self.data)
+            if not self.failed:
+                self._good = img
+            self._bg = (key, packed(img))
         return self._bg
 
     def regions(self, now, t):
         try:
-            return [(packed(img.convert("RGB")), xy) for img, xy in self.moving(now, t, self.data) or []]
+            return [(part if isinstance(part, bytes) or part.mode == "LA" else packed(part.convert("RGB")), xy)
+                    for part, xy in self.moving(now, t, self.data) or []]
         except Exception as e:   # what moves just stops; the page stays
             self.failed = f"{type(e).__name__}: {e}"
             return []
 
     @classmethod
-    def check(cls, tries=20):
-        """the self-test every Simple page gets: draws SAMPLE, the waiting screen if it fetches, and SAMPLE broken
-        tries ways (fuzz.py), and checks what moves stays on the screen"""
-        import copy, random, fuzz
+    def check(cls, tries=20, **options):
+        """the self-test every Simple page gets: it draws with no data yet and SAMPLE, and what moves has to stay on the
+        screen. Then SAMPLE broken tries ways (fuzz.py): the page has to stay up, though draw() may refuse the data (it
+        keeps its last picture). python3 -I kiosk/fuzz.py <page> says which broken data it refused, and why"""
+        import contextlib, copy, io, random, fuzz
         now = datetime(2026, 10, 19, 9, 41)
-        for n in range(tries + 1):
-            page = cls()
-            page.every = 0   # never fetches in a test
-            page.data = cls.SAMPLE if n == 0 else fuzz.mangle(copy.deepcopy(cls.SAMPLE), random.Random(19000 + n))
+        for n in range(-1, tries + 1):
+            data = None if n < 0 else cls.SAMPLE if n == 0 else fuzz.mangle(copy.deepcopy(cls.SAMPLE), random.Random(19000 + n))
+            page = cls.showing(data, **options)
             try:
-                assert page.picture(now, page.data, safe=False).size == SCREEN
+                with contextlib.redirect_stdout(io.StringIO()) if n > 0 else contextlib.nullcontext():   # refusals aren't news here
+                    picture = page.picture(now, page.data, safe=n > 0)
+                    page.background(now)   # as the display has it, so what moves can use the picture (drawn)
+                assert picture.size == SCREEN, f"draws {picture.size}, not {SCREEN}"
                 for t in (0, .5, 3, 30):
-                    for img, (x, y) in page.moving(now, t, page.data) or []:
-                        assert 0 <= x and 0 <= y and x + img.width <= SCREEN[0] and y + img.height <= SCREEN[1], \
-                            f"something moving at ({x}, {y}), {img.width}x{img.height}, goes off the screen"
+                    for part, (x, y) in page.regions(now, t):
+                        w, h = (SCREEN[0], len(part) // SCREEN[0] // 2) if isinstance(part, bytes) else part.size
+                        assert 0 <= x and 0 <= y and x + w <= SCREEN[0] and y + h <= SCREEN[1], \
+                            f"something moving at ({x}, {y}), {w}x{h}, goes off the screen"
+                    assert not page.failed or n > 0, "what moves: " + page.failed
             except Exception as e:
-                raise AssertionError(f"{cls.name}: with " + ("SAMPLE" if n == 0 else f"SAMPLE broken (try {n})")
-                                     + f": {type(e).__name__}: {e}. data: {page.data!r:.300}") from e
-        if cls.every:
-            assert cls().picture(now, None, safe=False).size == SCREEN
+                raise AssertionError(f"{cls.name}: with " + ("no data" if n < 0 else "SAMPLE" if n == 0 else f"SAMPLE broken (try {n})")
+                                     + f": {type(e).__name__}: {e}. data: {data!r:.300}") from e
 
     @classmethod
-    def preview(cls, now=None):
+    def preview(cls, now=None, **options):
         """the page with SAMPLE, and what moves where it is when the page comes up"""
-        now, page = now or datetime(2026, 10, 19, 9, 41), cls()
-        img = page.picture(now, cls.SAMPLE, safe=False)
-        for part, xy in page.moving(now, 0, cls.SAMPLE) or []:
-            img.paste(part.convert("RGB"), xy)
+        now = now or datetime(2026, 10, 19, 9, 41)
+        page = cls.showing(cls.SAMPLE, **options)
+        img = page.picture(now, page.data, safe=False)
+        for part, xy in page.moving(now, 0, page.data) or []:
+            if isinstance(part, bytes):
+                part = unpack(Image.frombytes("LA", (SCREEN[0], len(part) // SCREEN[0] // 2), part))
+            img.paste(unpack(part) if part.mode == "LA" else part.convert("RGB"), xy)
         return img

@@ -8,7 +8,7 @@ again).
 
 The kiosk's `github` and `agents` pages show things only my desktop can see: private repos, my herdr workspaces and my
 Claude and Codex quotas. `deskfeed.py` gathers them every 5 minutes and pushes them to the Pi as
-`~/.cache/kiosk/desk.json`. The pages read that file through `kit.Feed`.
+`~/.cache/kiosk/desk.json`. The pages read that file as their `kit.Simple` file, again whenever it changes.
 
 It uses whichever of `gh` (logged in), `herdr` and `kodexbar-quotas` (KodexBar Suite) the desktop has. Each one is its
 own section: a tool that isn't installed sends nothing, and its page leaves that part out (without KodexBar, the

@@ -419,35 +419,62 @@ def check():
 
 
 def check_simple():
-    """kit.Simple as the display runs it: fetching in the background, keeping its data when a fetch fails, and showing
-    why when it can't draw, rather than stopping"""
-    class Page(kit.Simple):
-        name, every, answers = "simple", 600, [{"n": 1}, OSError("offline")]
-        def fetch(self):
-            got = self.answers.pop(0)
-            if isinstance(got, Exception):
-                raise got
-            return got
-        def draw(self, img, now, data):
-            assert data["n"] < 2, "too many"
-        def moving(self, now, t, data):
-            return [(Image.new("RGB", (8, 8)), (0, 0))] if t < 1 else 1 / 0
-    page, now = Page(), datetime(2026, 10, 19, 9, 41)
+    """kit.Simple as the display runs it: fetching into a cache every renderer shares, keeping its data when a fetch
+    fails, reading a file when it changes, and keeping its last picture when new data can't be drawn"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        cache, feed = os.path.join(folder, "cache.json"), os.path.join(folder, "feed.json")
 
-    def settle():
-        for _ in range(100):
-            if not page._busy:
-                return
-            time.sleep(0.01)
-    bg = page.background(now)[1]; settle()
-    assert bg.size == kit.SCREEN and page.data == {"n": 1}, "the first fetch, in the background"
-    assert page.background(now)[0][1] == page._new == 1, "new data is drawn"
-    page._got = 0; page.background(now); settle()
-    assert page.data == {"n": 1} and 59 < page.every - (time.time() - page._got) <= 60, "a failed fetch keeps the data, and tries again in a minute"
-    page.data, page._new = {"n": 5}, page._new + 1
-    page.background(now)
-    assert page.failed == "AssertionError: too many" and kit.Simple.picture(page, now, {"n": 1}).size == kit.SCREEN, "a draw that fails says why"
-    assert page.regions(now, 0)[0][0].mode == "LA" and page.regions(now, 2) == [] and "ZeroDivisionError" in page.failed, "so does what moves"
+        class Page(kit.Simple):
+            name, every, cache, asked, answers = "simple", 600, None, [], [{"n": 1}, OSError("offline")]
+            def __init__(self, n=1):
+                self.n = n
+            def fetch(self):
+                self.asked.append(1)
+                got = self.answers.pop(0)
+                if isinstance(got, Exception):
+                    raise got
+                return got
+            def draw(self, img, now, data):
+                assert data["n"] < 2, "too many"
+            def moving(self, now, t, data):
+                return [(Image.new("RGB", (8, 8)), (0, 0))] if t < 1 else 1 / 0
+        now = datetime(2026, 10, 19, 9, 41)
+
+        def settle(page):
+            page.background(now)
+            for _ in range(200):
+                if not page._busy:
+                    break
+                time.sleep(0.01)
+            return page.background(now)
+        assert Page().where() == Page(n=1).where() != Page(n=2).where() and Page(n=2).options == {"n": 2}, "a cache for each set of options"
+        Page.cache = cache
+        page = Page(); settle(page)
+        assert page.data == {"n": 1} and page.updated and page.age() < 5, "the first fetch, into the cache, and read back"
+        other = Page(); other.background(now)
+        assert other.data == {"n": 1} and len(Page.asked) == 1, "another renderer reads the cache rather than fetching again"
+        os.utime(cache, (time.time() - 700,) * 2); page._tried = 0; settle(page)
+        assert page.data == {"n": 1} and isinstance(page.problem, OSError) and len(Page.asked) == 2, "a failed fetch keeps the data"
+        page.background(now); assert len(Page.asked) == 2, "and waits a minute before it tries again"
+        json.dump({"n": 5}, open(cache, "w")); key = page.background(now)[0]
+        assert page.data == {"n": 5} and page.failed == "AssertionError: too many" and page.background(now)[0] == key, \
+            "data that can't be drawn keeps the last picture, drawn once"
+        assert page.regions(now, 0)[0][0].mode == "LA" and page.regions(now, 2) == [] and "ZeroDivisionError" in page.failed, "what moves just stops"
+
+        class Fed(kit.Simple):
+            name, file = "fed", feed
+            def draw(self, img, now, data):
+                kit.text(img, (0, 0), str(data["n"]), kit.W)
+        fed = Fed(); fed.background(now)
+        assert fed.data is None and not fed.failed, "no file yet: the waiting screen"
+        json.dump({"n": 1}, open(feed, "w")); fed.background(now)
+        assert fed.data == {"n": 1}, "the file, once it's there"
+        open(feed, "w").write('{"n": '); os.utime(feed, (time.time() + 5,) * 2); fed.background(now)
+        assert fed.data == {"n": 1}, "a half-written file keeps the last"
+        json.dump({"n": 2}, open(feed, "w")); os.utime(feed, (time.time() + 10,) * 2); fed.background(now)
+        assert fed.data == {"n": 2}, "and it's read again when it changes"
+        assert not os.path.exists(os.path.join(folder, "fed")) and sorted(os.listdir(folder)) == ["cache.json", "feed.json"]
 
 
 def check_templates():

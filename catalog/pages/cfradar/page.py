@@ -16,11 +16,11 @@ Options (in playlist.json): geo, the region's Radar geoId (default 6254927, Penn
 (default PENNSYLVANIA); asns, the two networks to compare (default [7922, 701], Comcast and Verizon).
 Cloudflare's orange, yellow and blue, and only this page uses them.
 """
-import json, math, os, tempfile, threading, time, urllib.parse, urllib.request
+import json, math, os, tempfile, time, urllib.parse, urllib.request
 from datetime import datetime, timezone
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, W, G, D, A, text, clock, packed, local
+from kit import SCREEN, W, G, D, A, Simple, text, clock, packed, local
 
 API = "https://api.cloudflare.com/client/v4/radar/"
 TOKEN = os.path.expanduser("~/.config/kiosk/cloudflare-radar.token")
@@ -266,76 +266,6 @@ def draw(now, data, problem=None):
     return img
 
 
-class Page:
-    """Radar, as a page of the kiosk's cycle"""
-    name, seconds = "cfradar", 20
-    fps = 4 if os.uname().machine.startswith("arm") else 8   # Philadelphia's pulse
-
-    def __init__(self, geo=6254927, name="PENNSYLVANIA", asns=(7922, 701), data=None):
-        self.geo, self.label, self.asns = geo, name, list(asns)
-        self.fixed, self.data, self.problem = data is not None, data, None
-        self.busy, self.mtime, self.bg = False, None, (None, None)
-        self.good = None   # the last data that drew, for when the newest can't
-        self.pulse = []   # Philadelphia's pulse, packed, made the first time it's needed
-        self.cache, self.tried = cache_for(self.geo, self.asns), 0   # where this page's data is; when a fetch was last tried
-
-    def fetch(self):
-        self.tried = time.time()   # a failure (or no token) waits EVERY like a success, not a tick
-        try:
-            with open(TOKEN) as f:
-                token = f.read().strip()
-        except OSError:
-            self.problem = "needs a Radar token in ~/.config/kiosk/cloudflare-radar.token"; self.busy = False; return
-        try:
-            data = dict(fetch(token, self.geo, self.asns), name=self.label)
-            try:
-                draw(datetime.now(), data)   # a reply the page can't draw doesn't replace the cache
-            except Exception:
-                raise ValueError("odd reply")
-            os.makedirs(os.path.dirname(self.cache), exist_ok=True)
-            with open(self.cache + ".tmp", "w") as f:
-                json.dump(data, f)
-            os.replace(self.cache + ".tmp", self.cache)
-            self.problem = None
-        except Exception as e:
-            self.problem = f"Radar: {e}"[:60]   # keep the last data; the page says how old it is
-        self.busy = False
-
-    def start(self, now):
-        pass   # background() fetches when the shared cache is old
-
-    def background(self, now):
-        if not self.fixed:
-            mtime = os.path.getmtime(self.cache) if os.path.exists(self.cache) else None
-            if not self.busy and (mtime is None or time.time() - mtime > EVERY) and time.time() - self.tried > EVERY:
-                self.busy = True; threading.Thread(target=self.fetch, daemon=True).start()
-            if mtime != self.mtime:
-                self.mtime = mtime
-                try:
-                    with open(self.cache) as f:
-                        self.data = json.load(f)
-                except (OSError, ValueError):
-                    pass
-        key = (now.minute, self.mtime, self.problem)
-        if key != self.bg[0]:
-            try:
-                self.bg = (key, packed(draw(now, self.data, self.problem))); self.good = self.data
-            except Exception:   # data that can't be drawn: the last data that did, marked, or a no-data page before there is any
-                try:
-                    img = draw(now, self.good); text(img, (800, 14), "CAN'T DRAW LATEST DATA", A, scale=2)
-                except Exception:
-                    img = draw(now, None, "Radar data can't be drawn")
-                self.bg = (key, packed(img))
-        return self.bg
-
-    def regions(self, now, t):
-        if not self.data:
-            return []
-        if not self.pulse:
-            self.pulse = [packed(state(i / PULSE)) for i in range(PULSE)]
-        return [(self.pulse[int(t * 8) % PULSE], (804, 64 + 44))]   # a ring every 2 s
-
-
 def _sample():
     import math
     from datetime import timedelta
@@ -352,6 +282,48 @@ def _sample():
 SAMPLE = _sample()
 
 
+class Page(Simple):
+    """Radar, as a page of the kiosk's cycle"""
+    name, seconds, every, SAMPLE = "cfradar", 20, EVERY, SAMPLE
+    fps = 4 if os.uname().machine.startswith("arm") else 8   # Philadelphia's pulse
+    mark = (1216, 14)
+
+    def __init__(self, geo=6254927, name="PENNSYLVANIA", asns=(7922, 701)):
+        self.geo, self.label, self.asns = geo, name, list(asns)
+        self.cache = cache_for(self.geo, self.asns)
+        self.pulse = []   # Philadelphia's pulse, packed, made the first time it's needed
+
+    def fetch(self):
+        try:
+            with open(TOKEN) as f:
+                token = f.read().strip()
+        except OSError:
+            raise Trouble("needs a Radar token in ~/.config/kiosk/cloudflare-radar.token") from None
+        try:
+            data = dict(fetch(token, self.geo, self.asns), name=self.label)
+            try:
+                draw(datetime.now(), data)   # a reply the page can't draw doesn't replace the cache
+            except Exception:
+                raise ValueError("odd reply")
+        except Exception as e:
+            raise Trouble(f"Radar: {e}"[:60]) from e   # the last data stays; the page says how old it is
+        return data
+
+    def draw(self, img, now, data):
+        img.paste(draw(now, data, self.problem and str(self.problem)))
+
+    def moving(self, now, t, data):
+        if not data:
+            return []
+        if not self.pulse:
+            self.pulse = [packed(state(i / PULSE)) for i in range(PULSE)]
+        return [(self.pulse[int(t * 8) % PULSE], (804, 64 + 44))]   # a ring every 2 s
+
+
+class Trouble(Exception):
+    """why there's no new data, as the page says it"""
+
+
 def check():
     from datetime import timedelta
     from kit import unpack
@@ -361,7 +333,8 @@ def check():
                           (dict(SAMPLE, traffic=[]), None)):
         assert draw(now, data, problem).size == SCREEN, "draws with data, waiting, without a token, with an outage, with no traffic"
     assert cloud().getbbox() and chart(SAMPLE["traffic"], (100, 50)).size == (100, 50)
-    page = Page(data=SAMPLE)
+    Page.check()
+    page = Page.showing(SAMPLE)
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key
     a, b = page.regions(now, 0), page.regions(now, 1)
@@ -409,13 +382,13 @@ def check():
     assert chart([5, None, ["t", "x"]], (100, 50)).size == (100, 50), "rows that aren't pairs are dropped, not raised on"
     assert draw(now, dict(SAMPLE, traffic=[1, 2, 3])).size == SCREEN
     # and what can't draw keeps the last good frame, or says so before there is one
-    flaky = Page(data=SAMPLE); good = flaky.background(now)[1]
+    flaky = Page.showing(SAMPLE); good = flaky.background(now)[1]
     flaky.data = {"traffic": 5}
     marked = flaky.background(now + timedelta(minutes=1))[1]   # the next minute: a repeat failure
     assert marked.size == good.size and marked.tobytes() != good.tobytes(), "data that can't be drawn shows the last good data, marked"
     mark = lambda im: any(r > 200 and g > 150 and b < 140 for _, (r, g, b) in unpack(im).crop((800, 14, 1160, 30)).getcolors(99999))   # RGB565 rounds the amber
     assert mark(marked) and not mark(good), "with the marker in amber in the header"
-    assert Page(data={"traffic": 5}).background(now)[1].mode == "LA", "and with none yet, a no-data page"
+    assert Page.showing({"traffic": 5}).background(now)[1].mode == "LA", "and with none yet, a no-data page"
     # the stale line is big and amber
     stale = draw(datetime(2026, 10, 15, 20, 0) + timedelta(hours=3), SAMPLE)
     row = lambda im: [c for _, c in im.crop((14, SCREEN[1] - 42, SCREEN[0] - 14, SCREEN[1] - 8)).getcolors(99999)]
@@ -426,8 +399,7 @@ def check():
     head = lambda data: [c for _, c in draw(now, data).crop((32, 100, 140, 124)).getcolors(99999)]
     assert ORANGE in head(SAMPLE) and ORANGE not in head(dict(SAMPLE, traffic=[])), "no data: no +0.0% headline"
     assert draw(now, SAMPLE).crop((SCREEN[0] - 340, 11, SCREEN[0] - 170, 39)).tobytes() != draw(now, dict(SAMPLE, traffic=SAMPLE["traffic"][-40:])).crop((SCREEN[0] - 340, 11, SCREEN[0] - 170, 39)).tobytes(), "the span label follows the data"
-    # a failed fetch, or no token, waits EVERY like a success, and nothing reopens the token file each tick; the cache is per
-    # region and networks
+    # a failed fetch, or no token, waits a minute, not a tick, and says why; the cache is per region and networks
     global fetch, TOKEN, CACHE
     saved = fetch, TOKEN, CACHE
     tmp = tempfile.TemporaryDirectory(); here = tmp.name
@@ -435,8 +407,8 @@ def check():
     page = Page()
     try:
         assert cache_for(1, [2, 3]) != cache_for(1, [3, 2]) != cache_for(4, [2, 3]) and page.cache != Page(geo=1).cache != Page(asns=(1, 2)).cache
-        page.fetch()
-        assert "token" in page.problem and time.time() - page.tried < 5 and not page.busy
+        page.fetch_now()
+        assert "token" in str(page.problem) and time.time() - page._tried < 5 and not page._busy
         opened = []
         real_open = open
         globals()["open"] = lambda *a, **k: (opened.append(a), real_open(*a, **k))[1]
@@ -444,22 +416,22 @@ def check():
             page.background(now)
         finally:
             del globals()["open"]
-        assert not opened and not page.busy, "a tick right after a failure doesn't touch the token or fetch again"
+        assert not opened and not page._busy, "a tick right after a failure doesn't touch the token or fetch again"
         with open(TOKEN, "w") as f:
             f.write("x")
         calls = []
         def down(*a):
             calls.append(a); raise OSError("down")
         fetch = down
-        page.fetch()
-        assert page.problem.startswith("Radar:") and len(calls) == 1 and time.time() - page.tried < 5 and not page.busy
+        page.fetch_now()
+        assert str(page.problem).startswith("Radar:") and len(calls) == 1
         page.background(now)
         assert len(calls) == 1, "after a failed fetch, the next tick waits"
         fetch = lambda *a: {"traffic": 5}   # a reply that can't be drawn doesn't replace the cache
-        page.tried = 0; page.fetch()
-        assert page.problem == "Radar: odd reply" and not os.path.exists(page.cache), "an undrawable reply isn't cached"
+        page.fetch_now()
+        assert str(page.problem) == "Radar: odd reply" and not os.path.exists(page.cache), "an undrawable reply isn't cached"
         fetch = lambda *a: SAMPLE
-        page.fetch()
+        page.fetch_now()
         assert page.problem is None and os.path.exists(page.cache), "a drawable one is"
     finally:
         fetch, TOKEN, CACHE = saved
@@ -474,7 +446,7 @@ def check():
 def preview(now=None):
     """the page with the sample, for the emulator and kiosk.py --png"""
     import kit
-    page = Page(data=SAMPLE); now = now or datetime(2026, 10, 15, 16, 10)
+    page = Page.showing(SAMPLE); now = now or datetime(2026, 10, 15, 16, 10)
     img = page.background(now)[1].copy()
     for part, xy in page.regions(now, 0.6):
         img.paste(part, xy)

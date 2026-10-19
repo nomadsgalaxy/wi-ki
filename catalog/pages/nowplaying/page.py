@@ -13,7 +13,7 @@ import base64, io, json, math, os, struct, time, zlib
 from datetime import datetime
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, O, W, G, D, B, M, A, BG, RULE, RAISED, text, clock, packed
+from kit import SCREEN, O, W, G, D, B, M, A, BG, RULE, RAISED, Simple, text, clock, packed
 
 ART = 120                                 # the cover is 120x120, shown 4x
 X, R = 16 + ART * 4 + 32, SCREEN[0] - 16  # the column right of the cover
@@ -165,13 +165,25 @@ def draw(now, track):
     return img
 
 
-class Page:
-    """now playing, as a page of the kiosk's cycle"""
-    name, seconds, fps = "nowplaying", 30, 20
+def sample_art():
+    """a stand-in cover: the gradient, as a PNG in base64 like the desktop sends"""
+    img = gradient(ART).resize((ART, ART)).rotate(90); buf = io.BytesIO(); img.save(buf, "PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+SAMPLE = {"title": "Second Rate Town (Acoustic)", "artist": "Good Kid", "album": "Second Rate Town (Acoustic)",
+          "player": "YouTube Music", "length": 157.0,
+          "lyrics": [[10.0, "I've been living in a second rate town"], [14.5, "with a first rate feeling"],
+                     [19.0, "that it's all gonna come around"]]}
+LEVELS = [round(60 * abs(((i * 7) % 48) / 48 - 0.5) * 2) for i in range(48)]
+
+
+class Page(Simple):
+    """now playing, as a page of the kiosk's cycle: the track is its file, and each frame reads the stream's latest"""
+    name, seconds, fps, SAMPLE = "nowplaying", 30, 20, SAMPLE
 
     def __init__(self, folder="/dev/shm/kiosk-nowplaying"):
-        self.folder = folder
-        self.track, self.track_mtime, self.bg = None, None, (None, None)
+        self.folder, self.file = folder, os.path.join(folder, "track.json")
         self.spectrum, self.lines, self.bar, self.strip = Spectrum(), (None, None), (None, None), (None, None)
 
     def path(self, name):
@@ -191,33 +203,21 @@ class Page:
         f = self.frame()
         return bool(f and f.get("playing"))
 
-    def start(self, now):
-        pass   # background() reads the track, and only when it changes
+    def clean(self, data):
+        return clean_track(data)
 
-    def background(self, now):
-        mtime = os.path.getmtime(self.path("track.json")) if os.path.exists(self.path("track.json")) else None
-        if mtime != self.track_mtime:
-            self.track_mtime = mtime
-            try:
-                self.track = clean_track(json.load(open(self.path("track.json"))))
-            except (OSError, ValueError):
-                self.track = None
-        key = (self.track_mtime, now.minute)
-        if key != self.bg[0]:
-            self.bg = (key, packed(draw(now, self.track)))
-        return self.bg
+    def draw(self, img, now, data):
+        img.paste(draw(now, data))
 
-    def regions(self, now, t):
+    def moving(self, now, t, data):
         f = self.frame() or {"levels": [], "pos": 0, "playing": False}
         levels = f["levels"] if f["playing"] else [0] * len(f["levels"] or [0] * 48)
-        if self.bg[1] is None:
-            self.background(now)
-        if self.strip[0] != self.bg[0]:   # the background behind the spectrum, the full screen's width (cover included)
-            self.strip = (self.bg[0], self.bg[1].crop((0, VIZ_Y, SCREEN[0], VIZ_Y + VIZ_H)))   # cropped once a song
+        if self.strip[0] is not self.drawn:   # the background behind the spectrum, the full screen's width (cover included)
+            self.strip = (self.drawn, self.drawn.crop((0, VIZ_Y, SCREEN[0], VIZ_Y + VIZ_H)))   # cropped once a song
         viz = self.spectrum.draw(levels, self.strip[1])
-        lyrics, pos = (self.track or {}).get("lyrics") or [], f["pos"]
+        lyrics, pos = (data or {}).get("lyrics") or [], f["pos"]
         i = lyric_at(lyrics, pos)
-        if (self.track_mtime, i) != self.lines[0]:   # the lyric lines only change when the line does
+        if (id(data), i) != self.lines[0]:   # the lyric lines only change when the line does
             img = Image.new("RGB", (R - X, 72), BG)
             if lyrics:
                 room = (R - X) // 16
@@ -225,8 +225,8 @@ class Page:
                     text(img, (0, 0), lyrics[i][1][:room], W)
                 if i + 1 < len(lyrics):
                     text(img, (0, 36), lyrics[i + 1][1][:room], D)
-            self.lines = ((self.track_mtime, i), packed(img))
-        length = (self.track or {}).get("length") or 0
+            self.lines = ((id(data), i), packed(img))
+        length = (data or {}).get("length") or 0
         key = (int(pos), length, f["playing"])
         if key != self.bar[0]:
             img = Image.new("RGB", (R - X, 32), BG); d = ImageDraw.Draw(img)
@@ -238,19 +238,6 @@ class Page:
                 text(img, (R - X, 14), mmss(length), G, scale=1, right=True)
             self.bar = (key, packed(img))
         return [(viz, (0, VIZ_Y)), (self.lines[1], (X, LYRIC_Y)), (self.bar[1], (X, BAR_Y))]
-
-
-def sample_art():
-    """a stand-in cover: the gradient, as a PNG in base64 like the desktop sends"""
-    img = gradient(ART).resize((ART, ART)).rotate(90); buf = io.BytesIO(); img.save(buf, "PNG")
-    return base64.b64encode(buf.getvalue()).decode()
-
-
-SAMPLE = {"title": "Second Rate Town (Acoustic)", "artist": "Good Kid", "album": "Second Rate Town (Acoustic)",
-          "player": "YouTube Music", "length": 157.0,
-          "lyrics": [[10.0, "I've been living in a second rate town"], [14.5, "with a first rate feeling"],
-                     [19.0, "that it's all gonna come around"]]}
-LEVELS = [round(60 * abs(((i * 7) % 48) / 48 - 0.5) * 2) for i in range(48)]
 
 
 def check():
@@ -269,6 +256,7 @@ def check():
     for track in (dict(SAMPLE, art=sample_art()), dict(SAMPLE, art="not a png"), None, dict(SAMPLE, title="x" * 90), odd, {"title": None}):
         assert draw(now, clean_track(track)).size == SCREEN, "draws with, without and with a broken cover"
     folder = tempfile.mkdtemp()
+    Page.check(folder=folder)
     page = Page(folder)
     assert not page.active() and page.background(now)[1].size == SCREEN, "nothing playing: skipped, but draws"
     assert len(page.regions(now, 0)) == 3, "and its regions draw too"

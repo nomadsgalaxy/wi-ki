@@ -5,18 +5,18 @@ in SEPTA gold, and a Silverliner rolling along the track at the bottom.
 
 The site judges Regional Rail: every train under 10 minutes late is "not fucked", one or more 10 to 29 minutes late "a
 little fucked", one or more 30 minutes late "fucked". Its API (/api/status, /api/rr) asks for no more than a request
-every few minutes, so this fetches every 5 minutes, in a background thread, into CACHE, which every renderer on the
-machine shares. A failed fetch keeps the last one and says how old it is.
+every few minutes, so this fetches every 5 minutes, in the background, into CACHE, which every renderer on the
+machine shares (kit.Simple). A failed fetch keeps the last one and says how old it is.
 
 Options (in playlist.json): sfw, true to say "fcked" like the site's work-safe twin, isseptafcked.com (default false).
 The colours are SEPTA's own, from septa.org's stylesheet (the line colours are its SEPTA Metro letters), and only this
 page uses them.
 """
-import json, math, os, tempfile, threading, time, urllib.error, urllib.request
+import json, math, os, tempfile, time, urllib.error, urllib.request
 from datetime import datetime
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, W, A, text, clock, packed
+from kit import SCREEN, W, A, Simple, text, clock, packed
 
 API = "https://isseptafucked.com/api/"
 CACHE = os.path.expanduser("~/.cache/kiosk/septa.json")
@@ -223,64 +223,39 @@ def api(path):
         return json.load(r)
 
 
-class Page:
-    """SEPTA's state, as a page of the kiosk's cycle"""
-    name, seconds = "septa", 20
-    fps = 4 if SLOW else 10   # the train: smooth on the render server, steppier on the Pi drawing by itself
+SAMPLE = {"status": {"status": {"rr": {"status": "fucked", "summary": "2 out of 45 trains are late."},
+                                "bus": {"status": "not fucked", "summary": "All 156 bus lines are running!"}}},
+          "rr": {"data": {"284": {"number": "284", "from": "Marcus Hook", "to": "Norristown TC", "late": 12},
+                          "444": {"number": "444", "from": "Airport", "to": "Warminster", "late": 1},
+                          "453": {"number": "453", "from": "Warminster", "to": "Airport", "late": 0},
+                          "9999": {"number": "9999", "from": "Doylestown", "to": "Newark", "late": 41}}},
+          "fetched": "2026-10-15T16:00:00"}
 
-    def __init__(self, sfw=False, data=None):
-        self.sfw, self.fixed, self.data = sfw, data is not None, data
-        self.busy, self.mtime, self.bg, self.rail, self.frames = False, None, (None, None), track(), {}
-        self.good = None   # the last data that drew, for when the newest can't
-        self.problem, self.tried = None, 0   # why there's no data; when a fetch was last tried
+
+class Page(Simple):
+    """SEPTA's state, as a page of the kiosk's cycle"""
+    name, seconds, every, cache, SAMPLE = "septa", 20, EVERY, CACHE, SAMPLE
+    fps = 4 if SLOW else 10   # the train: smooth on the render server, steppier on the Pi drawing by itself
+    mark = (896, 18)
+
+    def __init__(self, sfw=False):
+        self.sfw, self.rail, self.frames = sfw, track(), {}
 
     def fetch(self):
-        self.tried = time.time()   # a failure waits EVERY like a success, not a tick
         try:
             data = {"status": api("status"), "rr": api("rr"), "fetched": datetime.now().isoformat(timespec="seconds")}
-            if not usable(data):
-                raise ValueError("odd reply")   # not cached: the last good one stays
-            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-            with open(CACHE + ".tmp", "w") as f:
-                json.dump(data, f)
-            os.replace(CACHE + ".tmp", CACHE)
-            self.problem = None
-        except ValueError:   # a reply that came, but isn't JSON or isn't the shape
-            self.problem = "isseptafucked.com sent something odd"
-        except Exception:
-            self.problem = "can't reach isseptafucked.com"   # keep the last one; the page says how old it is. Not the exception's text
-        self.busy = False
+        except ValueError as e:   # a reply that came, but isn't JSON
+            raise Odd() from e
+        if not usable(data):
+            raise Odd()   # not cached: the last good one stays
+        return data
 
-    def start(self, now):
-        pass   # background() fetches when the shared cache is old
+    def draw(self, img, now, data):
+        problem = None if self.problem is None else "isseptafucked.com sent something odd" if isinstance(self.problem, Odd) \
+            else "can't reach isseptafucked.com"   # the page says how old the last one is. Not the exception's text
+        img.paste(draw(now, data, self.sfw, problem)); img.paste(self.rail, (0, TRACK_Y))
 
-    def background(self, now):
-        if not self.fixed:
-            mtime = os.path.getmtime(CACHE) if os.path.exists(CACHE) else None
-            if not self.busy and (mtime is None or time.time() - mtime > EVERY) and time.time() - self.tried > EVERY:   # another renderer may have fetched
-                self.busy = True; threading.Thread(target=self.fetch, daemon=True).start()
-            if mtime != self.mtime:
-                self.mtime = mtime
-                try:
-                    with open(CACHE) as f:
-                        self.data = usable(json.load(f)) or self.data
-                except (OSError, ValueError):
-                    pass
-        key = (now.minute, self.mtime, id(self.data), self.problem)
-        if key != self.bg[0]:
-            try:
-                img = draw(now, self.data, self.sfw, self.problem); img.paste(self.rail, (0, TRACK_Y))
-                self.bg = (key, packed(img)); self.good = self.data
-            except Exception:   # data that got past usable() but still can't be drawn: the last data that did, marked, or a no-data page before there is any
-                try:
-                    assert self.good
-                    img = draw(now, self.good, self.sfw); text(img, (480, 18), "CAN'T DRAW LATEST DATA", A, scale=2)
-                except Exception:
-                    img = draw(now, None, self.sfw, "septa data can't be drawn")
-                img.paste(self.rail, (0, TRACK_Y)); self.bg = (key, packed(img))
-        return self.bg
-
-    def regions(self, now, t):
+    def moving(self, now, t, data):
         """the train, right to left along the track, which wraps round: the whole strip, so nothing it passed is left
         behind. A lap is exactly 10 s, so its frames repeat: each is made once and kept (on a Pi Zero, packing the strip
         every frame would cost more than the rest of the page)"""
@@ -294,13 +269,9 @@ class Page:
         return [(self.frames[k], (0, TRACK_Y))]
 
 
-SAMPLE = {"status": {"status": {"rr": {"status": "fucked", "summary": "2 out of 45 trains are late."},
-                                "bus": {"status": "not fucked", "summary": "All 156 bus lines are running!"}}},
-          "rr": {"data": {"284": {"number": "284", "from": "Marcus Hook", "to": "Norristown TC", "late": 12},
-                          "444": {"number": "444", "from": "Airport", "to": "Warminster", "late": 1},
-                          "453": {"number": "453", "from": "Warminster", "to": "Airport", "late": 0},
-                          "9999": {"number": "9999", "from": "Doylestown", "to": "Newark", "late": 41}}},
-          "fetched": "2026-10-15T16:00:00"}
+class Odd(ValueError):
+    """isseptafucked.com answered, with something that isn't its status"""
+
 
 
 def check():
@@ -312,7 +283,8 @@ def check():
     now = datetime(2026, 10, 15, 16, 2)
     for data, sfw in ((SAMPLE, False), (SAMPLE, True), (None, False), (dict(SAMPLE, rr={}), False)):
         assert draw(now, data, sfw).size == SCREEN, "draws with data, work-safe, before the first fetch, and with no trains"
-    page = Page(data=SAMPLE)
+    Page.check()
+    page = Page.showing(SAMPLE)
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key
     for t in (0, 1.5, 7, 9.99):   # the strip is the whole track, and the loop is seamless
@@ -344,7 +316,7 @@ def check():
     nodata = dict(SAMPLE, rr={"data": {"1": {"number": "1", "from": "A", "to": "B", "late": "soon"}}})
     assert STEEL in board(nodata) and GOLD not in board(nodata) and GOLD in board(dict(SAMPLE, rr={"data": {"1": {"late": 0}}})), "unknown delay isn't ON TIME"
     # a draw that raises: the last good data, marked, or a no-data page before there is one (a frozen frame would leave the clock and banner stale)
-    flaky = Page(data=SAMPLE); good = flaky.background(now)[1]
+    flaky = Page.showing(SAMPLE); good = flaky.background(now)[1]
     bad = {"status": {"status": {"rr": {"status": "x"}, "bus": {"summary": 1, "status": 1}}}, "fetched": "2026-10-15T16:00:00"}
     flaky.data = bad
     real = globals()["draw"]
@@ -353,8 +325,8 @@ def check():
     try:
         marked = flaky.background(now + timedelta(minutes=1))[1]
         assert marked.tobytes() != good.tobytes() and mark(marked) and not mark(good), "a draw that fails shows the last good data, marked, with the new time"
-        fresh = Page(data=SAMPLE); fresh.data = bad
-        assert fresh.background(now)[1] is not None and not mark(fresh.background(now)[1]), "and with none yet, a no-data page"
+        fresh = Page.showing(bad)
+        assert mark(fresh.background(now)[1]) and fresh.failed, "and with none yet, a no-data page, marked"
     finally:
         globals()["draw"] = real
     # every part of an old answer is dimmed, not only the verdict, and a stamp from the future is no answer either
@@ -363,44 +335,55 @@ def check():
         assert lit(old, box) < lit(draw(now, SAMPLE), box), "stale dims the summary, the bus lines and the departure board"
     future = draw(now, dict(SAMPLE, fetched="2026-10-16T16:00:00"))
     assert lit(future, (144, 226, 700, 250)) < lit(draw(now, SAMPLE), (144, 226, 700, 250)) and A in [c for _, c in future.crop((28, TRACK_Y - 44, 400, TRACK_Y - 28)).getcolors(9999)], "a future stamp is dimmed and flagged"
-    # a failed fetch waits EVERY like a success, not a tick; a good reply is cached, a bad one is not
-    global api, CACHE
-    tmp = tempfile.TemporaryDirectory()
-    got, saved, CACHE = api, CACHE, os.path.join(tmp.name, "septa.json")
+    # a failed fetch waits a minute, not a tick, and says why without the exception's text; a good reply is cached, a bad one is not
+    global api
+    got, tmp = api, tempfile.TemporaryDirectory()
+    p, calls = Page(), []
+    p.cache = os.path.join(tmp.name, "septa.json")
+
+    def fetched(answer):
+        answer_with(answer); p._tried = 0; p.load()
+        for _ in range(200):
+            if not p._busy:
+                return p.background(now)[1]
+            time.sleep(0.01)
+
+    def answer_with(answer):
+        global api
+        def reply(path):
+            calls.append(path)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer(path) if callable(answer) else answer
+        api = reply
+    shown = lambda img: unpack(img).crop((28, 120, 700, 152)).tobytes()
     try:
-        calls = []
-        def down(path):
-            calls.append(path); raise urllib.error.URLError("down")
-        api = down
-        p = Page(); p.mtime = 1; p.fetch()
-        assert p.problem == "can't reach isseptafucked.com" and "urlopen" not in p.problem and time.time() - p.tried < 5 and not p.busy and calls == ["status"]
+        fetched(urllib.error.URLError("down"))
+        assert isinstance(p.problem, urllib.error.URLError) and calls == ["status"] and p.data is None
+        assert shown(p.background(now)[1]) == shown(packed(draw(now, None, False, "can't reach isseptafucked.com"))), "it says it can't reach it, not why"
         p.background(now)
-        assert calls == ["status"] and not p.busy, "a tick right after a failure doesn't fetch again"
-        api = lambda path: {"junk": 1}
-        p.fetch()
-        assert p.problem == "isseptafucked.com sent something odd" and not os.path.exists(CACHE), "an odd reply isn't cached, and isn't called unreachable"
-        def junk(path):
-            raise json.JSONDecodeError("x", "", 0)
-        api = junk
-        p.fetch()
-        assert p.problem == "isseptafucked.com sent something odd", "so is a reply that isn't JSON"
-        api = lambda path: SAMPLE["status"] if path == "status" else SAMPLE["rr"]
-        p.fetch()
-        assert p.problem is None and usable(json.load(open(CACHE))), "a good reply is cached"
-        with open(CACHE, "w") as f:
+        assert calls == ["status"] and not p._busy, "a tick right after a failure doesn't fetch again"
+        fetched({"junk": 1})
+        assert isinstance(p.problem, Odd) and not os.path.exists(p.cache), "an odd reply isn't cached, and isn't called unreachable"
+        assert shown(p.background(now)[1]) == shown(packed(draw(now, None, False, "isseptafucked.com sent something odd")))
+        fetched(json.JSONDecodeError("x", "", 0))
+        assert isinstance(p.problem, Odd), "so is a reply that isn't JSON"
+        fetched(lambda path: SAMPLE["status"] if path == "status" else SAMPLE["rr"])
+        assert p.problem is None and usable(json.load(open(p.cache))) and usable(p.data), "a good reply is cached, and shown"
+        with open(p.cache, "w") as f:
             f.write('{"status": 5, "fetched": "x"}')
-        q = Page(); q.background(now)
-        assert q.data is None and q.bg[1] is not None, "an odd cache file isn't installed"
+        q = Page(); q.cache = p.cache
+        assert shown(q.background(now)[1]) == shown(packed(draw(now, None))) and not q.failed, "an odd cache file draws as no data"
         assert draw(now, None, False, "can't reach isseptafucked.com").tobytes() != draw(now, None).tobytes(), "no data says so"
     finally:
-        api, CACHE = got, saved
+        api = got
         tmp.cleanup()
 
 
 def preview(now=None):
     """the page with the sample, the train mid-screen, for the emulator and kiosk.py --png"""
     import kit
-    page = Page(data=SAMPLE)
+    page = Page.showing(SAMPLE)
     img = page.background(now or datetime(2026, 10, 15, 16, 2))[1].copy()
     for part, xy in page.regions(now, 5.5):
         img.paste(part, xy)

@@ -13,11 +13,11 @@ brings its own location, place and credit, and lat, lon and place still win over
 every temperature is shown in; left out, it's the one people use where the forecast is for (°F in the US). secondary:
 true also shows the other unit, in smaller type beside the big temperature and under each day's.
 """
-import json, math, os, struct, threading, time, urllib.request
+import json, math, os, struct, time, urllib.request
 from datetime import date, datetime, timedelta
 from PIL import Image, ImageDraw
 
-from kit import (SCREEN, O, W, G, D, B, C, A, BG, RULE, DIM, kind, warmth, clock, FONT, text, paste_icon,
+from kit import (SCREEN, O, W, G, D, B, C, A, BG, RULE, DIM, Simple, kind, warmth, clock, FONT, text, paste_icon,
                  packed, rgb565)
 from . import scene
 
@@ -257,11 +257,8 @@ def valid(w):
 def fetch(lat, lon):
     w = valid(download(URL.format(lat=lat, lon=lon)))
     if not w:
-        raise ValueError("not a forecast")   # refresh() keeps the last good one, and its age
-    os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    with open(CACHE + ".tmp", "w") as f:
-        json.dump(w, f)
-    os.replace(CACHE + ".tmp", CACHE)
+        raise ValueError("not a forecast")   # the page keeps the last good one, and its age
+    return w
 
 
 def cached():
@@ -281,14 +278,27 @@ def waiting():
     return img
 
 
-class Page:
+# TODAY's low (4.1) is the calendar day's, so it can sit below the overnight hours on the strip: it was colder this morning
+SAMPLE = {"current": {"temperature_2m": 16.3, "apparent_temperature": 14.9, "relative_humidity_2m": 62, "wind_speed_10m": 9.4,
+                      "wind_direction_10m": 300, "weather_code": 3, "is_day": 1},
+          "hourly": {"time": [f"2026-10-14T{h:02d}:00" for h in range(17, 24)] + [f"2026-10-15T{h:02d}:00" for h in range(5)],
+                     "temperature_2m": [16, 16, 14, 13, 11, 10, 9, 8, 8, 7, 7, 7],
+                     "precipitation_probability": [0, 0, 5, 10, 35, 60, 40, 20, 0, 0, 0, 0], "weather_code": [3] * 12},
+          "daily": {"time": [f"2026-10-{d}" for d in range(14, 19)], "weather_code": [3, 61, 0, 2, 95],
+                    "temperature_2m_max": [17.4, 14.4, 18.9, 21.7, 26.7], "temperature_2m_min": [4.1, 6.7, 8.3, 11.1, 16.1],
+                    "precipitation_probability_max": [10, 70, 0, None, 40],
+                    "sunrise": ["2026-10-14T07:12"] * 5, "sunset": ["2026-10-14T18:20"] * 5}}
+
+
+class Page(Simple):
     """the weather, as a page of the kiosk's cycle (see kiosk.py). It stays up for exactly one loop of the scene, and
     the scene holds one moment of the day for that whole loop, so it always plays one seamless loop. Its frames are
     drawn once, packed at 300x128, and replayed until the sky moves on: by day when the sun steps along its arc or the
-    weather changes, at night every 5 minutes, as the lit windows reshuffle."""
-    name, seconds = "weather", scene.LOOP
+    weather changes, at night every 5 minutes, as the lit windows reshuffle. The forecast is fetched every 10 minutes
+    into CACHE, which the calendar reads too."""
+    name, seconds, every, cache, SAMPLE = "weather", scene.LOOP, 600, CACHE, SAMPLE
 
-    def __init__(self, w=None, lat=None, lon=None, place=None, landscape=None, units=None, secondary=False):
+    def __init__(self, lat=None, lon=None, place=None, landscape=None, units=None, secondary=False):
         if units not in (None, "c", "f"):
             raise ValueError(f'units is "f" or "c" (or left out, for the place\'s own), not {units!r}')
         if not isinstance(secondary, bool):
@@ -300,71 +310,41 @@ class Page:
         self.lon = lon if lon is not None else land["lon"] if land else -75.17
         self.place = place or (land["place"].upper() if land else "PHILADELPHIA")
         self.credit = f"scene: {land['credit']['author']}, {land['credit']['licence']}"[:40] if land else None
-        self.fixed = w is not None    # given a forecast (the self-test), it never fetches
-        self.w = clean(w)             # one it can't draw is no forecast yet: the page waits
-        self.mtime, self.last_try = (1 if self.w else 0), 0
-        self.loop, self.loop_key, self.moment, self.bg = {}, None, None, (None, None)
-        self.fetching = None   # the thread fetching a new forecast, if one is
-
-    def refresh(self):
-        if self.fixed:
-            return
-        if (not self.fetching or not self.fetching.is_alive()) and time.time() - self.last_try > (600 if os.path.exists(CACHE) else 30):   # no forecast yet: keep trying
-            self.last_try = time.time()   # in a thread: the page boundary never waits up to 20 s on the network
-            self.fetching = threading.Thread(target=self.fetch, daemon=True); self.fetching.start()
-        mtime = os.path.getmtime(CACHE) if os.path.exists(CACHE) else 0   # no forecast at all yet: keep waiting
-        if mtime != self.mtime and (got := cached()):   # one that isn't a forecast leaves the last good one, and its age
-            self.mtime, self.w = mtime, got
+        self.loop, self.loop_key, self.moment = {}, None, None
 
     def fetch(self):
-        try:
-            fetch(self.lat, self.lon)
-        except Exception:
-            pass  # keep the cached forecast, the panel says how old it is
+        return fetch(self.lat, self.lon)
+
+    def clean(self, data):
+        return clean(data)   # one it can't draw is no forecast: the page keeps the last, or waits
 
     def start(self, now):
-        self.refresh()
-        key = scene.moment(self.w, now, self.land) if self.w else None   # not the clock: by day one loop lasts until the sun or the weather moves
+        self.load()
+        key = scene.moment(self.data, now, self.land) if self.data else None   # not the clock: by day one loop lasts until the sun or the weather moves
         if key != self.loop_key:
             self.loop, self.loop_key, self.moment = {}, key, now
-        if self.w:
+        if self.data:
             self.small(0)   # any rebuild happens now, before anything moves
 
     def small(self, i):
         if i not in self.loop:
-            self.loop[i] = packed(scene.draw(self.w, self.moment, i / scene.FPS, self.land))
+            self.loop[i] = packed(scene.draw(self.data, self.moment, i / scene.FPS, self.land))
         return self.loop[i]
 
-    def background(self, now):
-        key = (now.minute, self.mtime)
-        if not self.w:   # the first forecast hasn't come yet: say so, rather than show one that's made up
-            if key != self.bg[0]:
-                self.bg = (key, packed(waiting()))
-            return self.bg
-        if key != self.bg[0]:
-            full = Image.new("LA", SCREEN)
-            full.paste(packed(panel(self.w, now, 0 if self.fixed else time.time() - self.mtime, 0, self.place, self.credit,
-                                    self.units, self.secondary)), (PANEL, 0))
-            self.bg = (key, full)
-        return self.bg
+    def draw(self, img, now, data):
+        if not data:   # the first forecast hasn't come yet: say so, rather than show one that's made up
+            img.paste(waiting())
+            return
+        img.paste((0, 0, 0), (0, 0, PANEL, SCREEN[1]))   # the scene goes here
+        img.paste(panel(data, now, self.age(), 0, self.place, self.credit, self.units, self.secondary), (PANEL, 0))
 
-    def regions(self, now, t):
-        if not self.w:
+    def moving(self, now, t, data):
+        if not data:
             return []
+        if self.moment is None:
+            self.start(now)
         i = round(t * scene.FPS) % int(scene.LOOP * scene.FPS)
         return [(self.small(i).resize((PANEL, 512), Image.NEAREST), (0, 1))]
-
-
-# TODAY's low (4.1) is the calendar day's, so it can sit below the overnight hours on the strip: it was colder this morning
-SAMPLE = {"current": {"temperature_2m": 16.3, "apparent_temperature": 14.9, "relative_humidity_2m": 62, "wind_speed_10m": 9.4,
-                      "wind_direction_10m": 300, "weather_code": 3, "is_day": 1},
-          "hourly": {"time": [f"2026-10-14T{h:02d}:00" for h in range(17, 24)] + [f"2026-10-15T{h:02d}:00" for h in range(5)],
-                     "temperature_2m": [16, 16, 14, 13, 11, 10, 9, 8, 8, 7, 7, 7],
-                     "precipitation_probability": [0, 0, 5, 10, 35, 60, 40, 20, 0, 0, 0, 0], "weather_code": [3] * 12},
-          "daily": {"time": [f"2026-10-{d}" for d in range(14, 19)], "weather_code": [3, 61, 0, 2, 95],
-                    "temperature_2m_max": [17.4, 14.4, 18.9, 21.7, 26.7], "temperature_2m_min": [4.1, 6.7, 8.3, 11.1, 16.1],
-                    "precipitation_probability_max": [10, 70, 0, None, 40],
-                    "sunrise": ["2026-10-14T07:12"] * 5, "sunset": ["2026-10-14T18:20"] * 5}}
 
 
 def check():
@@ -385,7 +365,8 @@ def check():
             w["current"]["weather_code"] = code
             frame(w, datetime(2026, 10, 14, hh, mm), 0, 3.0)
     assert frame(SAMPLE, now, 4000, 0).tobytes() != img.tobytes(), "a stale forecast says so"
-    page = Page(json.loads(json.dumps(SAMPLE)))   # as a page: one whole loop, ending where it began
+    Page.check(tries=6)   # each try draws a whole scene: a few is plenty, fuzz.py does more
+    page = Page.showing(json.loads(json.dumps(SAMPLE)))   # as a page: one whole loop, ending where it began
     page.start(now)
     key, bg = page.background(now)
     assert bg.size == SCREEN and bg.mode == "LA" and page.background(now)[0] == key, "the background only changes when it must"
@@ -487,10 +468,10 @@ def check():
     got = clean(odd)
     assert len(got["hourly"]["time"]) == 5 and len(got["daily"]["time"]) == 3, "lists that don't line up are cut to what does"
     assert got["daily"]["temperature_2m_max"][1] == 60 and got["current"]["relative_humidity_2m"] == 50, "clamped, and defaulted"
-    odd_page = Page(odd); odd_page.start(now)
-    assert odd_page.w == got and odd_page.regions(now, 0.0), "and drawn"
+    odd_page = Page.showing(odd); odd_page.start(now)
+    assert odd_page.data == got and odd_page.regions(now, 0.0), "and drawn"
     assert all(clean(x) is None for x in (None, "x", {}, {"current": {}}, {**SAMPLE, "daily": {}}, {**SAMPLE, "current": {"temperature_2m": "16"}}))
-    assert Page({}).w is None and Page({}).regions(now, 0.0) == [], "no usable forecast: the page waits"
+    assert Page.showing({}).data is None and Page.showing({}).regions(now, 0.0) == [], "no usable forecast: the page waits"
     assert "timezone=auto" in URL and "New_York" not in URL, "the forecast's hours are the location's own"
     global CACHE, fetch, download
     import tempfile
@@ -498,21 +479,20 @@ def check():
     with tempfile.TemporaryDirectory() as folder:
         try:
             CACHE = os.path.join(folder, "weather.json")
+            Here = type("Here", (Page,), {"cache": CACHE})   # the page, with its cache in folder
             fetch = lambda lat, lon: (_ for _ in ()).throw(OSError("offline"))
-            first = Page(); first.start(now)   # the very first fetch fails, with nothing cached
-            first.fetching.join()
+            first = Here(); first.fetch_now()   # the very first fetch fails, with nothing cached
             key, bg = first.background(now)
-            assert bg.size == SCREEN and first.regions(now, 0.0) == [], "it waits, and says so, instead of crashing"
-            open(CACHE, "w").write("{broken")
-            first.last_try = 0; first.start(now); first.fetching.join()
-            assert first.w is None and first.regions(now, 0.0) == [], "a broken cache is still no forecast"
+            assert bg.size == SCREEN and first.regions(now, 0.0) == [] and isinstance(first.problem, OSError), "it waits, and says so, instead of crashing"
+            open(CACHE, "w").write("{broken"); first.load()
+            assert first.data is None and first.regions(now, 0.0) == [], "a broken cache is still no forecast"
             # a good forecast cached, then answers that aren't forecasts: the cache and the page keep the good one
             fetch = real[1]
             with open(CACHE, "w") as f:
                 json.dump(SAMPLE, f)
             os.utime(CACHE, (1_000_000, 1_000_000))
-            page = Page(); page.last_try = time.time(); page.refresh()
-            assert page.w == SAMPLE and page.mtime == 1_000_000
+            page = Here(); page._tried = time.time(); page.load()
+            assert page.data == clean(SAMPLE) and page.updated == datetime.fromtimestamp(1_000_000)
             bad = [{"error": True}, {"current": SAMPLE["current"]}, json.loads(json.dumps(SAMPLE).replace('"temperature_2m": 16.3', '"temperature_2m": NaN')),
                    json.loads(json.dumps(SAMPLE).replace('"sunrise": ["2026-10-14T07:12"', '"sunrise": ["dawn"')),
                    {**SAMPLE, "hourly": {**SAMPLE["hourly"], "temperature_2m": [16]}},
@@ -521,25 +501,22 @@ def check():
                    json.loads(json.dumps(SAMPLE).replace('"temperature_2m": 16.3', '"temperature_2m": 1' + "0" * 1000))]   # isfinite() overflows
             for answer in bad:
                 download = lambda url: answer
-                page.last_try = 0; page.refresh(); page.fetching.join()
+                page.fetch_now(); page.load()
                 with open(CACHE) as f:
                     assert json.load(f) == SAMPLE, f"{answer!r:.50} didn't replace the cache"
-                assert page.w == SAMPLE and page.mtime == 1_000_000 and os.path.getmtime(CACHE) == 1_000_000, "nor the forecast, nor its age"
+                assert page.data == clean(SAMPLE) and os.path.getmtime(CACHE) == 1_000_000, "nor the forecast, nor its age"
             assert valid(SAMPLE) is SAMPLE and all(valid(b) is None for b in bad)
             with open(CACHE, "w") as f:
                 json.dump({"error": True}, f)
-            assert cached() is None, "a cached answer that isn't a forecast isn't one"
-            with open(CACHE, "w") as f:
-                f.write(json.dumps(SAMPLE).replace('"relative_humidity_2m": 62', '"relative_humidity_2m": 1' + "0" * 1000))
-            assert cached() is None, "a cached forecast with a huge number isn't one, and doesn't raise"
-            page.refresh()
-            assert page.w == SAMPLE, "and the page keeps the good one it had"
-            # a slow network never holds up the page boundary: start() returns while the fetch is still going
+            page.load()
+            assert page.data == clean(SAMPLE), "a cached answer that isn't a forecast isn't one: the page keeps the good one it had"
+            # a slow network never holds up the page boundary: the fetch is in the background
             download = lambda url: (time.sleep(0.5), SAMPLE)[1]
-            slow = Page(); slow.start(now)
-            began = time.time(); slow.last_try = 0; slow.start(now)
-            assert time.time() - began < 0.25 and slow.fetching.is_alive(), "the fetch is off the display path"
-            slow.fetching.join()
+            os.utime(CACHE, (1_000_000, 1_000_000))
+            slow = Here(); began = time.time(); slow.start(now)
+            assert time.time() - began < 0.25 and slow._busy, "the fetch is off the display path"
+            while slow._busy:
+                time.sleep(0.05)
         finally:
             CACHE, fetch, download = real
 
@@ -560,7 +537,7 @@ def landscapes_check(at):
     assert scene.draw(SAMPLE, at(12, 0), 0.0, "lake").tobytes() != scene.draw(SAMPLE, at(12, 0), 0.0).tobytes()
     assert scene.moment(SAMPLE, at(12, 0), "lake") != scene.moment(SAMPLE, at(12, 0)), "each landscape has its own loop"
     assert scene.layers(SAMPLE, at(12, 0), "lake")[0]["strike"] == tuple(lake["strike"]), "lightning hits its own peak"
-    page = Page(json.loads(json.dumps(SAMPLE)), landscape="lake")
+    page = Page.showing(json.loads(json.dumps(SAMPLE)), landscape="lake")
     assert (page.lat, page.lon, page.place) == (lake["lat"], lake["lon"], "LAKE PLACID") and "Wi-Ki, CC0-1.0" in page.credit
     assert Page(landscape="lake", lat=1.0, place="HOME").lat == 1.0 and Page(landscape="lake", place="HOME").place == "HOME"
     assert Page().credit is None and Page().place == "PHILADELPHIA", "no landscape: Philadelphia, as always"
