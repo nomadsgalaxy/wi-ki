@@ -13,6 +13,9 @@ Every message is a 12-byte header (kind, a, payload length) and its payload:
   RECT  a = the first row; the payload is x and width (two shorts), then the rectangle's rows, compressed
   TRAN  a = the length of the transition's name; the payload is the name, then the whole frame, compressed
   PING  nothing
+  SHOW  a page change, before the server draws it: the payload is the page's name. Both sides keep each page's last
+        frame (what the Pi had on screen when it left that page), so with a = 1 the Pi puts its copy up at once, and
+        what the server sends next is only what's changed since: a touch doesn't wait for the page to be drawn and sent
 and one the Pi sends the other way:
   TUCH  a touch on the Pi's screen, as JSON (see kiosk.py's TOUCH): the server hands it to the page it's drawing
 
@@ -73,6 +76,7 @@ class Server:
     def __init__(self, port, touch=None, poke=lambda: None):
         self.mm, self.sent, self.conn, self.quiet, self.pinged = bytearray(SIZE), None, None, 0.0, 0.0
         self.touch, self.poke = touch, poke   # where the Pi's touches go (kiosk.py's TOUCH), and what wakes the display
+        self.kept, self.current = {}, None   # each page's last frame, as the Pi keeps it (see SHOW), and the page up
         self.listener = socket.create_server(("", port), reuse_port=False)
         threading.Thread(target=self.accept, daemon=True).start()
 
@@ -97,6 +101,7 @@ class Server:
             if self.conn:
                 self.conn.close()
             self.sent, self.conn = None, conn   # a new connection gets the whole screen
+            self.kept, self.current = {}, None   # and starts with nothing kept, as the Pi does
             threading.Thread(target=self.touches, args=(conn,), daemon=True).start()
 
     def touches(self, conn):
@@ -125,6 +130,16 @@ class Server:
 
     def visible(self):
         return True
+
+    def page(self, name, instant):
+        """kiosk.py's main(), as a new page comes up: tell the Pi (SHOW), and on an instant change (a touch, no
+        transition) have it put up its own copy of the page's last frame, if it has one"""
+        if self.conn and self.current is not None and self.sent is not None:
+            self.kept[self.current] = self.sent   # what the Pi has on screen now, which it keeps too
+        up = instant and name in self.kept
+        if self.conn and self.send(b"SHOW", int(up), name.encode()) and up:
+            self.sent = self.kept[name]
+        self.current = name
 
     def play(self, new):
         """a page change: the Pi plays the transition into new, and the server waits it out before sending more"""
@@ -172,11 +187,13 @@ def read(sock, n):
     return bytes(data)
 
 
-def forward(sock, touch, every=0.05):
-    """the Pi's touches (its touch file, written by touchpanel.py) up the link to the server, until it closes"""
+def forward(sock, touch, wake):
+    """the Pi's touches (its touch file, written by touchpanel.py) up the link to the server, until it closes. wake is
+    set the moment there's a touch (kiosk.py's WAKE), so it goes straight away; the timeout is for anything else that
+    writes the file, like kiosk-ctl."""
     seen = os.path.getmtime(touch) if os.path.exists(touch) else None
     while True:
-        time.sleep(every)
+        wake.wait(0.1); wake.clear()
         try:
             mtime = os.path.getmtime(touch)
             if mtime != seen:
@@ -188,15 +205,16 @@ def forward(sock, touch, every=0.05):
             return
 
 
-def client(address, mm, play=transitions.play, stop=None, touch=None):
+def client(address, mm, play=transitions.play, stop=None, touch=None, wake=None):
     """the Pi's side: put what the server sends on the screen, until the link drops (then it raises) or stop() says
     the Pi has something of its own to show. The server pings every few seconds, so that's checked often enough.
-    touch: the Pi's touch file, whose touches go up to the server."""
+    touch: the Pi's touch file, whose touches go up to the server, and wake what says there's a new one."""
     sock = socket.create_connection(address, timeout=5)
     sock.settimeout(TIMEOUT)
     if touch:
-        threading.Thread(target=forward, args=(sock, touch), daemon=True).start()
+        threading.Thread(target=forward, args=(sock, touch, wake or threading.Event()), daemon=True).start()
     print(f"remote: showing {address[0]}:{address[1]}", flush=True)
+    kept, current = {}, None   # each page's last frame, as the server keeps it (see SHOW)
     while True:
         kind, a, n = HEADER.unpack(read(sock, HEADER.size))
         payload = read(sock, n)
@@ -209,6 +227,12 @@ def client(address, mm, play=transitions.play, stop=None, touch=None):
                 o = (a + i) * STRIDE + x * 2; mm[o:o + w2] = rect[i * w2:(i + 1) * w2]
         elif kind == b"TRAN":
             play(mm, zlib.decompress(payload[a:]), payload[:a].decode())
+        elif kind == b"SHOW":
+            if current is not None:
+                kept[current] = bytes(mm)
+            current = payload.decode()
+            if a and current in kept:
+                mm[:] = kept[current]
         if stop and stop():
             sock.close()
             return
@@ -280,6 +304,23 @@ def check():
             break
         time.sleep(0.02)
     assert mm[0:2] == b"\x0b\x0b" and json.load(open(theirs)) == {"gesture": "next"} and pokes, "frames come down, and touches go up"
+    # SHOW: a page the Pi has had up before comes straight back from its own copy, and only changes follow
+    def settle(want):
+        for _ in range(100):
+            if mm == want:
+                return True
+            time.sleep(0.02)
+        return False
+    server.page("a", False); server.mm[:] = bytes([1]) * SIZE; server.flush()
+    assert settle(server.mm), "page a is up"
+    server.page("b", False); server.mm[:] = bytes([2]) * SIZE; server.flush()
+    assert settle(server.mm), "then page b"
+    sends = []; real = server.send; server.send = lambda kind, a, p=b"": sends.append(kind) or real(kind, a, p)
+    server.page("a", True)
+    assert settle(bytes([1]) * SIZE), "a touch back to a: the Pi's own copy, before the server has drawn anything"
+    server.mm[:] = bytes([1]) * SIZE; server.mm[5] = 9; server.flush()
+    assert settle(server.mm) and sends == [b"SHOW", b"RECT"], "and then only what changed"
+    server.send = real
     done.set(); server.mm[0:2] = b"\x0c\x0c"; server.flush(); pi.join(5)
     server.listener.close()
     print("remote: ok")
