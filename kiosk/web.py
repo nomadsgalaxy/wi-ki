@@ -47,8 +47,8 @@ class Browser:
             open(path(kit.SHAPE, "tmp"), "wb").write(buf.getvalue()); os.replace(path(kit.SHAPE, "tmp"), path(kit.SHAPE, "png"))
             self.saved = frame
 
-    def play(self, new):
-        transitions.play(self.mm, new, on_frame=lambda c: self.save())
+    def play(self, new, theme=None):
+        transitions.play(self.mm, new, theme, on_frame=lambda c: self.save())
 
     def flush(self):
         self.save()
