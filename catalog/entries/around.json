@@ -2,7 +2,7 @@
  "name": "around",
  "kind": "page",
  "home": "public",
- "about": "the blocks around a place: 311 reports, permits and bike-share stations (Hive76 and Philadelphia's open data by default; any city's Open311 and GBFS feeds)",
+ "about": "the blocks around a place: 311 reports, permits and bike-share stations (Hive76 and Philadelphia's open data by default, a few other cities ready to pick, or any city's Open311 and GBFS feeds)",
  "found": {
   "main": "d5c255"
  },
@@ -21,6 +21,7 @@
   "secrets": []
  },
  "settings": {
+  "city": "philadelphia",
   "view": "all",
   "lat": null,
   "lon": null,
@@ -33,6 +34,36 @@
   "permits": null
  },
  "form": {
+  "city": {
+   "type": "choice",
+   "label": "City",
+   "of": [
+    [
+     "",
+     "Philadelphia (Hive76)"
+    ],
+    [
+     "san-francisco",
+     "San Francisco"
+    ],
+    [
+     "chicago",
+     "Chicago"
+    ],
+    [
+     "boston",
+     "Boston"
+    ],
+    [
+     "washington",
+     "Washington, DC"
+    ],
+    [
+     "new-york",
+     "New York"
+    ]
+   ]
+  },
   "view": {
    "type": "choice",
    "label": "Shows",
