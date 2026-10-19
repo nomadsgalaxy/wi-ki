@@ -12,6 +12,9 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 SHAPES = {"bar": (1920, 515), "16-9": (1920, 1080), "9-16": (1080, 1920)}
 SHAPE = os.environ.get("KIOSK_SHAPE", "bar")
 SCREEN = SHAPES[SHAPE]
+# map data that doesn't change (street maps). Kiosks drawn on one machine (a render server's instances, one per kiosk)
+# can share a folder for it with KIOSK_MAPS, so each map is fetched once rather than once per kiosk
+MAPS = os.environ.get("KIOSK_MAPS") or os.path.expanduser("~/.cache/kiosk")
 # Nomads Galaxy's brand tokens: O is the lead accent, Warp Cyan; W Starlight, G Dust,
 # D and DIM the muted ink, B Pulsar Violet, C Warp Cyan, M Nebula Magenta (emphasis only), A Booster Amber (warnings);
 # then Deep Space, the Hairline (cyan at 18% over Deep Space) and Raised Space for panels

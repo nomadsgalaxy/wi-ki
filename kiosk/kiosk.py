@@ -55,7 +55,7 @@ SHOWING = os.path.expanduser(f"~/.cache/kiosk/showing{_suffix}")
 TOUCH = os.path.expanduser(f"~/.cache/kiosk/touch{_suffix}.json")
 # On a screen someone's touching, the rotation holds still for HOLD seconds after each touch, and a home button sits in
 # the corner (HOME_BUTTON, x0, y0, x1, y1) of every page but the home page itself.
-HOLD = 60
+HOLD = 30
 RESCUE = "/run/kiosk-rescue.json"   # rescue.py's hotspot, while the kiosk has lost its Wi-Fi: shown instead of the pages
 HOME_BUTTON = (0, kit.SCREEN[1] - 72, 72, kit.SCREEN[1])
 KDSETMODE, KD_TEXT, KD_GRAPHICS = 0x4B3A, 0, 1
@@ -271,6 +271,7 @@ def main(screen, until=None):
                 moving = 0 <= index != jump and not touched_jump   # a new page gets a transition, unless a touch asked
                 index = jump
                 page = pages[index]
+                getattr(screen, "page", lambda name, instant: None)(page.name, touched_jump)   # a render server tells its Pi
                 if touched_jump and page.name in last and screen.visible():   # a Zero takes seconds to draw some pages
                     mm[:] = last[page.name]; screen.flush()
                 try:
@@ -349,7 +350,7 @@ def display():
     try:
         if where:
             try:
-                remote.client(where, screen.mm, stop=setup_page.urgent, touch=TOUCH)   # the Setup page is only ever drawn here
+                remote.client(where, screen.mm, stop=setup_page.urgent, touch=TOUCH, wake=WAKE)   # the Setup page is only ever drawn here
             except Exception as e:   # unreachable, hung up, or garbled: draw it ourselves
                 print(f"remote: {e}; drawing locally for now", file=sys.stderr)
         ready = back(where) if where else None

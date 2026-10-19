@@ -56,6 +56,7 @@ class Gestures:
 
     def __init__(self, send):
         self.send, self.start, self.end, self.down_now, self.most, self.two = send, {}, {}, set(), 0, -DOUBLE
+        self.swiped = False
 
     def down(self, finger, xy):
         self.start[finger] = self.end[finger] = xy
@@ -63,6 +64,10 @@ class Gestures:
 
     def move(self, finger, xy):
         self.end[finger] = xy
+        if self.most == 1 and not self.swiped:   # a swipe goes as soon as it's far enough, not when the finger lifts
+            dx, dy = xy[0] - self.start[finger][0], xy[1] - self.start[finger][1]
+            if abs(dx) > SWIPE and abs(dx) > 2 * abs(dy):
+                self.send({"gesture": "next" if dx < 0 else "prev"}); self.swiped = True
 
     def up(self, finger, now):
         self.down_now.discard(finger)
@@ -70,11 +75,8 @@ class Gestures:
             return
         moves = [(self.end[f][0] - self.start[f][0], self.end[f][1] - self.start[f][1]) for f in self.start]
         still = all(abs(dx) < TAP and abs(dy) < TAP for dx, dy in moves)
-        if self.most == 1:
-            (dx, dy), = moves
-            if abs(dx) > SWIPE and abs(dx) > 2 * abs(dy):
-                self.send({"gesture": "next" if dx < 0 else "prev"})
-            elif still:
+        if self.most == 1 and not self.swiped:
+            if still:
                 x, y = self.start[finger]
                 self.send({"x": x, "y": y})
         if self.most == 2 and still and now - self.two >= DOUBLE:
@@ -83,7 +85,7 @@ class Gestures:
             if self.most == 2 and still:
                 self.send({"gesture": "menu"})
             self.two = -DOUBLE   # anything else in between starts it over
-        self.start, self.end, self.most = {}, {}, 0
+        self.start, self.end, self.most, self.swiped = {}, {}, 0, False
 
 
 def read(f, spans, screen, send, flip=False, clock=time.monotonic):
@@ -176,7 +178,12 @@ def check():
     assert got(events(*tap)) == [{"x": 960, "y": 257}], "a tap, scaled to the screen"
     assert got(events(*tap), flip=True) == [{"x": 959, "y": 257}], "and turned with an upside-down screen"
     left = [[(0, 1, 3000, 2000)], [(0, None, 2000, 2000)], [(0, None, 1000, 2100)], [(0, -1, None, None)]]
-    assert got(events(*left)) == [{"gesture": "next"}], "a swipe left: the next page"
+    assert got(events(*left)) == [{"gesture": "next"}], "a swipe left: the next page, once"
+    sent = []
+    g = Gestures(sent.append); g.down(0, (1500, 200)); g.move(0, (1300, 210))
+    assert sent == [{"gesture": "next"}], "sent while the finger's still moving, not when it lifts"
+    g.move(0, (900, 220)); g.up(0, 1.0)
+    assert sent == [{"gesture": "next"}], "and only once"
     assert got(events(*left), flip=True) == [{"gesture": "prev"}], "which is a swipe right on an upside-down screen"
     two = [[(0, 1, 1000, 2000), (1, 2, 1400, 2000)], [(0, -1, None, None)], [(1, -1, None, None)]]
     assert got(events(*two)) == [], "one two-finger tap: nothing yet"

@@ -21,7 +21,7 @@ import io, json, math, os, threading, time, urllib.error, urllib.parse, urllib.r
 from datetime import datetime
 from PIL import Image, ImageChops, ImageDraw
 
-from kit import SCREEN, O, W, G, D, B, A, BG, RULE, text, clock, packed
+from kit import SCREEN, MAPS, O, W, G, D, B, A, BG, RULE, text, clock, packed
 
 TALL = SCREEN[1] > SCREEN[0]
 BIG = SCREEN[1] >= 1000                                  # 16:9 or 9:16: bigger text, chunkier pixels
@@ -68,7 +68,7 @@ def streets(lat, lon, radius, wide=1.0):
     cached on disk once fetched:
     {"roads": [[kind, [[lat, lon], ...]]], "rivers": [[[lat, lon], ...]], "places": [[name, kind, population, lat, lon]],
     "airports": [[code, name, lat, lon]]}. Small queries rather than one big one: Overpass times big ones out when it's busy."""
-    path = os.path.expanduser(f"~/.cache/kiosk/radar-map-{lat}_{lon}_{radius}{'' if wide == 1 else f'x{wide:g}'}.json")
+    path = os.path.join(MAPS, f"radar-map-{lat}_{lon}_{radius}{'' if wide == 1 else f'x{wide:g}'}.json")
     if os.path.exists(path):
         return json.load(open(path))
     km = radius * 1.852; dlat, dlon = km / 111.32, wide * km / (111.32 * math.cos(math.radians(lat)))
@@ -94,7 +94,8 @@ def streets(lat, lon, radius, wide=1.0):
                         e["lat"], e["lon"]] for e in got["places"]],
             "airports": [[e["tags"].get("iata") or e["tags"]["icao"], e["tags"].get("name", ""), *where(e)] for e in got["airports"]]}
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    json.dump(data, open(path + ".tmp", "w")); os.replace(path + ".tmp", path)
+    tmp = f"{path}.{os.getpid()}.tmp"   # its own: kiosks sharing MAPS may fetch the same map at once
+    json.dump(data, open(tmp, "w")); os.replace(tmp, path)
     return data
 
 
