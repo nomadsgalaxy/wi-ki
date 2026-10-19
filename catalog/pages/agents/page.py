@@ -1,13 +1,14 @@
-"""The agents page: how much of each AI plan I've used (Claude Personal, Claude Work, Codex), and what my herdr
-workspaces are doing.
+"""The agents page: what a desktop's herdr workspaces are doing, and, if that desktop has KodexBar, how much of each
+AI plan it's used.
 
-Usage comes from KodexBar's quota engine (kodexbar-quotas), the same numbers the KodexBar widget shows: every window
-with how full it is and when it resets. Herdr's workspaces each get a row of pixel blocks, one per agent, coloured by
-status; working agents blink and are named.
+Herdr's workspaces each get a row of pixel blocks, one per agent, coloured by status; working agents blink and are
+named. Plan usage comes from KodexBar's quota engine (kodexbar-quotas), the numbers its widget shows: every window with
+how full it is and when it resets. A desktop without KodexBar sends no usage, and herdr gets the whole page.
 
-Both come from my desktop, in ~/.cache/kiosk/desk.json (feed/deskfeed.py, read through kit.Feed).
+Both come from the desktop, in ~/.cache/kiosk/desk.json (feed/deskfeed.py, read through kit.Feed).
 
-Options (in playlist.json): feed, the feed file (default ~/.cache/kiosk/desk.json).
+Options (in playlist.json): feed, the feed file (default ~/.cache/kiosk/desk.json); plans, "auto" (the usage panel
+when the feed has usage) or "off" (herdr only, always).
 """
 import json, math, os
 from datetime import datetime
@@ -80,17 +81,29 @@ def tidy(data):
     return out
 
 
-def draw(now, data, note=None):
+def plans_shown(data, plans="auto"):
+    """whether the usage panel goes on the page: only when the feed has usage, and plans isn't off"""
+    usage = (data or {}).get("usage") or {}
+    return plans != "off" and bool(usage.get("items") or usage.get("error"))
+
+
+def draw(now, data, note=None, plans="auto"):
     """the whole page, 1920x515 RGB; returns it and the working agents' blocks [(x, y)], which blink"""
     img = Image.new("RGB", SCREEN, BG); d = ImageDraw.Draw(img)
-    masthead(img, now, "// 03 · AGENTS", "FLIGHT DECK", note)
+    masthead(img, now, "// AGENTS", "HERDR", note)
     data = data or {}
+    y1 = SCREEN[1] - 8
+    if plans_shown(data, plans):
+        draw_usage(img, d, now, data["usage"], y1)
+    blinking = draw_herdr(img, d, data.get("herdr") or {}, SPLIT + 4 if plans_shown(data, plans) else MARGIN, y1)
+    return img, blinking
 
-    # usage: one panel, each plan's windows as pixel-block bars
-    x0, x1, y1 = MARGIN, SPLIT - 4, SCREEN[1] - 8
+
+def draw_usage(img, d, now, usage, y1):
+    """the usage panel, left of SPLIT: each plan's windows as pixel-block bars"""
+    x0, x1 = MARGIN, SPLIT - 4
     d.rectangle((x0, TOP, x1, y1), fill=RAISED, outline=RULE)
     text(img, (x0 + 14, TOP + 10), "TOKENS", O)
-    usage = data.get("usage") or {}
     y = TOP + 50
     if usage.get("error"):
         text(img, (x0 + 14, y), usage["error"][:80], A, scale=1); y += 24
@@ -112,28 +125,30 @@ def draw(now, data, note=None):
             y += 26
         y += 10
 
-    # herdr: every workspace, a pixel block per agent
-    x0, x1 = SPLIT + 4, SCREEN[0] - MARGIN
+
+def draw_herdr(img, d, herdr, x0, y1):
+    """herdr's panel, from x0 to the right edge: every workspace, a pixel block per agent -> the blocks that blink"""
+    x1 = SCREEN[0] - MARGIN
+    columns = WS_COLUMNS if x0 > SPLIT else WS_COLUMNS + 1   # the whole width when there's no usage panel
     d.rectangle((x0, TOP, x1, y1), fill=RAISED, outline=RULE)
-    text(img, (x0 + 14, TOP + 10), "HERDR", O)
-    herdr = data.get("herdr") or {}
+    text(img, (x0 + 14, TOP + 10), "WORKSPACES", O)
     agents = [a for ws in herdr.get("items", []) for a in ws["agents"]]
     tally = {}
     for a in agents:
         tally[a["status"]] = tally.get(a["status"], 0) + 1
     x = x1 - 14
     for status, n in sorted(tally.items(), key=lambda kv: -ORDER.get(kv[0], 3)):   # right to left, working ends up first
-        if x - len(f"{n} {status}") * 8 < x0 + 14 + 5 * 16 + 24:   # no further than HERDR: the rarest are left out
+        if x - len(f"{n} {status}") * 8 < x0 + 14 + 10 * 16 + 24:   # no further than WORKSPACES: the rarest are left out
             break
         x -= text(img, (x, TOP + 18), f"{n} {status}", STATUS.get(status, G), scale=1, right=True) + 24
     if herdr.get("error"):
         text(img, (x0 + 14, TOP + 50), herdr["error"][:110], A, scale=1)
     blinking = []
-    col_w = (x1 - x0 - 28) // WS_COLUMNS
+    col_w = (x1 - x0 - 28) // columns
     shown = [ws for ws in herdr.get("items", []) if ws["agents"]]   # empty workspaces have nothing to say
-    fits = (y1 - TOP - 50) // WS_ROW * WS_COLUMNS
+    fits = (y1 - TOP - 50) // WS_ROW * columns
     for i, ws in enumerate(shown[:fits]):
-        wx, wy = x0 + 14 + (i % WS_COLUMNS) * col_w, TOP + 50 + (i // WS_COLUMNS) * WS_ROW
+        wx, wy = x0 + 14 + (i % columns) * col_w, TOP + 50 + (i // columns) * WS_ROW
         busy = sorted(ws["agents"], key=lambda a: ORDER.get(a["status"], 3))
         live = ORDER.get(busy[0]["status"], 3) < 3
         text(img, (wx, wy), ws["label"][:18], W if live else G)
@@ -147,15 +162,15 @@ def draw(now, data, note=None):
         text(img, (wx, wy + 32), sub[:(col_w - 16) // 8], G if names else D, scale=1)
     if len(shown) > fits:
         text(img, (x1 - 14, y1 - 22), f"+{len(shown) - fits} more", D, scale=1, right=True)
-    return img, blinking
+    return blinking
 
 
 class Page:
-    """the agents and tokens, as a page of the kiosk's cycle"""
+    """herdr's agents, and the plans' usage if the desktop has it, as a page of the kiosk's cycle"""
     name, seconds = "agents", 20
 
-    def __init__(self, feed="~/.cache/kiosk/desk.json"):
-        self.feed, self.bg, self.blinking = Feed(feed), (None, None), []
+    def __init__(self, feed="~/.cache/kiosk/desk.json", plans="auto"):
+        self.feed, self.bg, self.blinking, self.plans = Feed(feed), (None, None), [], plans
         self.dark = packed(Image.new("RGB", (12, 12), RAISED))
 
     def active(self):
@@ -168,7 +183,7 @@ class Page:
         data = tidy(self.feed.load())
         key = (now.minute, self.feed.mtime)   # the reset countdowns move on every minute
         if key != self.bg[0]:
-            img, self.blinking = draw(now, data, self.feed.note(now) if data else ("waiting for the desktop", A))
+            img, self.blinking = draw(now, data, self.feed.note(now) if data else ("waiting for the desktop", A), self.plans)
             self.bg = (key, packed(img))
             self.lit = [(self.bg[1].crop((x, y, x + 12, y + 12)), (x, y)) for x, y in self.blinking]
         return self.bg
@@ -222,6 +237,11 @@ def check():
     assert odd["herdr"]["items"][0]["agents"] == [{"title": "", "status": ""}] and odd["herdr"]["error"] == "", "missing fields get defaults"
     assert draw(now, odd)[0].size == SCREEN and draw(now, tidy({"updated": SAMPLE["updated"], "herdr": []}))[0].size == SCREEN
     assert len(draw(now, SAMPLE)[1]) == 3, "each working agent blinks"
+    no_plans = dict(SAMPLE, usage=None)
+    assert plans_shown(SAMPLE) and not plans_shown(no_plans) and not plans_shown(SAMPLE, "off"), "the usage panel only with usage"
+    assert min(x for x, _ in draw(now, no_plans)[1]) < SPLIT and min(x for x, _ in draw(now, SAMPLE, plans="off")[1]) < SPLIT, \
+        "without the usage panel, herdr has the whole width"
+    assert min(x for x, _ in draw(now, SAMPLE)[1]) > SPLIT, "with it, herdr keeps to the right"
     import tempfile
     path = os.path.join(tempfile.mkdtemp(), "desk.json"); json.dump(SAMPLE, open(path, "w"))
     page = Page(feed=path)

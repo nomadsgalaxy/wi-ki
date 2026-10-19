@@ -15,7 +15,7 @@ over SSH, with a key that is only allowed to write ~/.cache/kiosk/desk.json (see
   deskfeed.py            print the feed
   deskfeed.py --check    self-test the parsing on sample data
 """
-import csv, io, json, os, sqlite3, subprocess, sys
+import csv, io, json, os, shutil, sqlite3, subprocess, sys
 from datetime import date, datetime, timedelta, timezone
 
 OWNERS = [("nomadsgalaxy", "Nomads Galaxy"), ("Positron3D", "Positron 3D"), ("hive76", "Hive76")]
@@ -150,15 +150,20 @@ def section(fn):
         return {"items": [], "error": f"{type(e).__name__}: {e}"[:120]}
 
 
-def feed():
+def feed(have=shutil.which):
+    """everything the desk pages read, from the tools this desktop has: one it hasn't got sends nothing (None), not an
+    error, so its page leaves that part out"""
+    has = lambda tool, fn: section(fn) if have(tool) else None
     return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "github": section(lambda: github_parse(json.loads(run("gh", "api", "graphql", "-f", f"query={github_query()}"))["data"])),
-            "usage": section(lambda: usage_parse(json.loads(run("kodexbar-quotas", "usage", "--provider", "enabled")))),
-            "herdr": section(lambda: herdr_parse(json.loads(run("herdr", "api", "snapshot")))),
+            "github": has("gh", lambda: github_parse(json.loads(run("gh", "api", "graphql", "-f", f"query={github_query()}"))["data"])),
+            "usage": has("kodexbar-quotas", lambda: usage_parse(json.loads(run("kodexbar-quotas", "usage", "--provider", "enabled")))),
+            "herdr": has("herdr", lambda: herdr_parse(json.loads(run("herdr", "api", "snapshot")))),
             "calendar": section(calendar)}
 
 
 def check():
+    bare = feed(have=lambda tool: None)   # a desktop with none of the tools
+    assert bare["github"] is None and bare["usage"] is None and bare["herdr"] is None, "a missing tool sends nothing, not an error"
     gh = {"o0": {"repositories": {"nodes": [{"name": "desk-kiosk", "isPrivate": True, "pushedAt": "2026-10-15T03:23:14Z",
                                              "defaultBranchRef": {"target": {"messageHeadline": "Celsius"}}},
                                             {"name": "empty", "isPrivate": False, "pushedAt": "2026-10-14T00:00:00Z",
