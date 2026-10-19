@@ -420,7 +420,8 @@ class Setup(BaseHTTPRequestHandler):
 
     def form(self):
         length = self.headers.get("Content-Length")
-        return {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(int(length)).decode(errors="replace")).items()}
+        # a field posted more than once (a picks list) comes as lines; anywhere else a line break is refused or matches nothing
+        return {k: "\n".join(v) for k, v in urllib.parse.parse_qs(self.rfile.read(int(length)).decode(errors="replace")).items()}
 
     # --- the pages ---
     def do_GET(self):
@@ -975,6 +976,11 @@ def settings_panel(csrf, i, entry, known, typed=None, wrong=None):
         if f["type"] == "bool":
             on = (typed.get(field) == "on") if typed is not None else bool(now.get(name, default))
             control = f'<label class=check><input type=checkbox name={field} value=on{" checked" if on else ""}> {label}</label>'
+        elif f["type"] == "picks":
+            ticked = typed.get(field, "").split("\n") if typed is not None else now.get(name) or default or []
+            control = (f'<label>{label} <small>(up to {f["max"]})</small><select name={field} multiple size=8>' + "".join(
+                f'<option value="{html.escape(v)}"{" selected" if v in ticked else ""}>{html.escape(text)}</option>'
+                for v, text in f["of"]) + "</select></label>")
         elif f["type"] == "choice":
             options = list(f.get("of", [])) + [[n, n] for n in choices(f["from"])] if "from" in f else list(f["of"])
             options = options if any(v == "" for v, _ in options) else [["", "its own"]] + options
@@ -1388,8 +1394,9 @@ def check():
         CATALOG, THEMES, CACHE = [f"{d}/entries"], [f"{d}/themes"], f"{d}/cache"
         os.makedirs(f"{d}/conf"); os.makedirs(f"{d}/entries"); os.makedirs(f"{d}/themes")
         where = {"lat": None, "lon": None, "place": "PHILADELPHIA"}
-        for e in ({"name": "weather", "kind": "page", "about": "the <b>weather</b>", "settings": {**where, "units": None},
+        for e in ({"name": "weather", "kind": "page", "about": "the <b>weather</b>", "settings": {**where, "units": None, "tags": None},
                    "form": {"units": {"type": "choice", "label": "Units", "of": [["", "own"], ["f", "°F"], ["c", "°C"]]},
+                            "tags": {"type": "picks", "label": "Tags", "max": 2, "of": [["a", "A"], ["b", "B"], ["c", "C"]]},
                             "place": {"type": "text", "label": "Place", "max": 24, "upper": True}, "lat": {"type": "internal"}}},
                   {"name": "sky", "kind": "page", "about": "a sky", "settings": where},
                   {"name": "big", "kind": "page", "about": "a big one", "needs": {"render": "server"}},
@@ -1582,6 +1589,14 @@ def check():
         assert post("/pages", {"action": "settings", "i": "0", "f_units": "c", "f_place": "porch"})[:2] == (303, "/pages")
         assert json.load(open(PLAYLIST))[0]["options"] == {"lat": 40.1, "lon": -75.2, "place": "PORCH", "units": "c"}
         assert post("/pages", {"action": "reset", "i": "0"})[0] == 303 and json.load(open(PLAYLIST))[0]["options"] == {"lat": 40.1, "lon": -75.2}
+        picks = lambda *tags: ask("POST", "/pages", name, urllib.parse.urlencode(
+            {"action": "settings", "i": "0", "csrf": csrf, "f_tags": tags}, doseq=True), {"__Host-kiosk": session})
+        assert picks("c", "a")[0] == 303 and json.load(open(PLAYLIST))[0]["options"]["tags"] == ["c", "a"], "a field ticked twice is a list"
+        assert "<option value=\"c\" selected>" in ask("GET", "/pages?set=0", name, cookies={"__Host-kiosk": session})[2]
+        assert picks("a", "b", "c")[0] == 400 and picks("z")[0] == 400, "no more than its max, and only its own"
+        assert ask("POST", "/pages", name, f"action=settings&i=0&i=1&csrf={csrf}", {"__Host-kiosk": session})[0] == 400, \
+            "any other field posted twice matches nothing"
+        assert post("/pages", {"action": "reset", "i": "0"})[0] == 303
         assert post("/transitions", {"t_rain": "on"})[0] == 303 and json.load(open(OFF)) == ["snow"]
         assert post("/transitions", {})[0] == 400, "not every transition off"
         # the Install page: a request for packs.py, checked here first
