@@ -17,6 +17,7 @@ goes in caches every renderer shares, and a failed fetch keeps the last one. Hiv
 uses them.
 
 Options (in playlist.json): view (default all); lat, lon, the middle (default Hive76); radius, in metres (default 1000).
+city, one of CITIES, sets everything below (and the middle) for a city we've tried, and any option given still wins.
 Another city's: place and area, for the title and the spot in the middle (default HIVE76 and Kensington); bikes, its
 bike share's GBFS feed, the folder with station_information.json in it, or null for none (default Indego's), and
 bike_share, its name; reports, "phl-carto", the address of an Open311 GeoReport v2 server (its open311/v2 folder,
@@ -44,6 +45,23 @@ EVERY, BIKES_EVERY, IDLE = 900, 60, 30   # seconds: city data, bikes, and how lo
 RETRY = 600                               # seconds before a fetch that failed is tried again (a success waits its EVERY)
 STALE_CITY, STALE_BIKES = 3600, 600       # seconds: older than this and the corner says so
 UA = {"User-Agent": "wi-ki around (github.com/nomadsgalaxy/wi-ki)"}
+# cities whose feeds answered when we tried them (2026-10-19): the middle is city hall. Only Philadelphia's and San
+# Francisco's 311 did (Chicago's and Boston's Open311 servers were down), so the rest get the map and their bikes
+CITIES = {
+    "philadelphia": dict(lat=HIVE76[0], lon=HIVE76[1], place="HIVE76", area="Kensington", bikes=INDEGO, bike_share="INDEGO",
+                         reports=PHL, permits=PHL),
+    "san-francisco": dict(lat=37.7793, lon=-122.4193, place="CITY HALL", area="San Francisco",
+                          bikes="https://gbfs.lyft.com/gbfs/2.3/bay/en/", bike_share="BAY WHEELS",
+                          reports="https://mobile311.sfgov.org/open311/v2", permits=None),
+    "chicago": dict(lat=41.8837, lon=-87.6319, place="CITY HALL", area="Chicago", bikes="https://gbfs.divvybikes.com/gbfs/en/",
+                    bike_share="DIVVY", reports=None, permits=None),
+    "boston": dict(lat=42.3603, lon=-71.0580, place="CITY HALL", area="Boston", bikes="https://gbfs.bluebikes.com/gbfs/en/",
+                   bike_share="BLUEBIKES", reports=None, permits=None),
+    "washington": dict(lat=38.8946, lon=-77.0313, place="CITY HALL", area="Washington, DC",
+                       bikes="https://gbfs.capitalbikeshare.com/gbfs/en/", bike_share="CAPITAL BIKESHARE", reports=None, permits=None),
+    "new-york": dict(lat=40.7128, lon=-74.0060, place="CITY HALL", area="New York", bikes="https://gbfs.citibikenyc.com/gbfs/en/",
+                     bike_share="CITI BIKE", reports=None, permits=None)}
+OWN = object()   # an option the playlist didn't give: the city's (JSON can't make this, so it never means a real value)
 VIEWS = [("all", "OVERVIEW"), ("reports", "311"), ("building", "BUILDING"), ("bikes", "BIKES")]
 MAP_W, PIX = 840, 2                       # the map: the left of the screen, drawn at half size and scaled up
 TAB_X, TAB_Y, TAB_W, TAB_H = 1192, 10, 170, 44
@@ -108,7 +126,8 @@ def fetch_bikes(lat, lon, count=6, feed=INDEGO):
     out = []
     for sid, s in info.items():
         st = status.get(sid, {})   # a station with no status says so (None), not 0 bikes and open
-        e = (st.get("num_bikes_available_types") or {}).get("electric", 0 if st else None)   # Indego's: classic, smart, electric
+        e = (st.get("num_bikes_available_types") or {}).get(   # Indego's: classic, smart, electric; Lyft's systems count them apart
+            "electric", st.get("num_ebikes_available", 0 if st else None))
         out.append({"name": s["name"], "lat": s["lat"], "lon": s["lon"], "far": math.hypot(*metres(lat, lon, s["lat"], s["lon"])),
                     "bikes": st.get("num_bikes_available"), "ebikes": e, "docks": st.get("num_docks_available"),
                     "open": bool(st["is_renting"]) if "is_renting" in st else None})
@@ -167,7 +186,56 @@ def spot(p):
         a, b = float(p["lat"]), float(p["lon"])
     except (KeyError, TypeError, ValueError):
         return None
-    return (a, b) if math.isfinite(a) and math.isfinite(b) else None
+    return (a, b) if abs(a) <= 90 and abs(b) <= 180 else None   # not NaN, and on the globe
+
+
+def whole(n, top=9999):
+    """n as a whole number from 0 to top, or None if it isn't a number"""
+    try:
+        return max(0, min(top, round(float(n)))) if math.isfinite(float(n)) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def words(v, n=80):
+    """v as text, cut at n characters; "" for None"""
+    return "" if v is None else str(v)[:n]
+
+
+def clean_city(c):
+    """the city's cache in the shape draw wants, whatever came in: None unless it has reports and permits lists, a
+    row with no readable time left out, a row's place None if it has none"""
+    if not isinstance(c, dict) or not all(isinstance(c.get(k), list) for k in ("reports", "permits")):
+        return None
+    out = {"fetched": c.get("fetched")}
+    for key, fields in (("reports", ("service_name", "status", "address")), ("permits", ("permittype", "typeofwork", "address"))):
+        out[key] = []
+        for r in c[key]:
+            if not isinstance(r, dict):
+                continue
+            try:
+                when(str(r.get("t")), datetime(2026, 1, 1))
+            except (ValueError, OverflowError, TypeError):
+                continue   # a row with no time can't be listed
+            a, b = spot(r) or (None, None)
+            out[key].append({**{f: words(r.get(f)) for f in fields}, "t": str(r["t"]), "lat": a, "lon": b})
+    return out
+
+
+def clean_bikes(b):
+    """the bikes' cache in the shape draw wants: None unless it has a stations list, a station with no name or place
+    left out, its counts whole numbers or None"""
+    if not isinstance(b, dict) or not isinstance(b.get("stations"), list):
+        return None
+    out = []
+    for s in b["stations"]:
+        p = spot(s) if isinstance(s, dict) else None
+        if p and s.get("name") is not None:
+            far = whole(s.get("far"), 10 ** 6)
+            out.append({"name": words(s["name"]), "lat": p[0], "lon": p[1], "far": 0 if far is None else far,
+                        **{k: whole(s.get(k)) for k in ("bikes", "ebikes", "docks")},
+                        "open": s["open"] if isinstance(s.get("open"), bool) else None})
+    return {"stations": out, "fetched": b.get("fetched")}
 
 
 def hexagon(d, x, y, r, fill, outline):
@@ -338,9 +406,13 @@ class Page:
     """the blocks around Hive76, as a page of the kiosk's cycle"""
     name, seconds = "around", 30
 
-    def __init__(self, view="all", lat=HIVE76[0], lon=HIVE76[1], radius=1000, data=None, place="HIVE76",
-                 area="Kensington", bikes=INDEGO, bike_share="INDEGO", reports=PHL, permits=PHL):
+    def __init__(self, view="all", lat=OWN, lon=OWN, radius=1000, data=None, place=OWN, area=OWN, bikes=OWN, bike_share=OWN,
+                 reports=OWN, permits=OWN, city="philadelphia"):
         assert view in dict(VIEWS), f"view is one of {', '.join(dict(VIEWS))}"
+        assert city in CITIES, f"city is one of {', '.join(CITIES)}"
+        given = dict(lat=lat, lon=lon, place=place, area=area, bikes=bikes, bike_share=bike_share, reports=reports, permits=permits)
+        own = {k: CITIES[city][k] if v is OWN else v for k, v in given.items()}
+        lat, lon, place, area, bikes, bike_share, reports, permits = (own[k] for k in given)
         for url in (bikes, reports):   # they're fetched, so only https, and only from a playlist someone wrote
             assert url in (None, PHL) or isinstance(url, str) and url.startswith("https://"), "a source has to be an https address"
         assert permits in (None, PHL), "permits are phl-carto or null"
@@ -351,7 +423,9 @@ class Page:
         self.where = {"place": str(place).upper()[:16], "area": str(area or "")[:24], "city": city,
                       "bike_share": str(bike_share).upper()[:16] if bikes else ""}
         self.fixed = data is not None
-        self.streets, self.city, self.bikes = (data or {}).get("streets"), (data or {}).get("city"), (data or {}).get("bikes")
+        data = data if isinstance(data, dict) else {}
+        self.streets = data.get("streets") if streets_ok(data.get("streets")) else None
+        self.city, self.bikes = clean_city(data.get("city")), clean_bikes(data.get("bikes"))
         self.busy, self.touched, self.bg, self.tried = False, 0.0, (None, None), {}
         self.paths = ()   # the two caches, set when first used: they depend on lat, lon and radius, and the tests swap CACHE and BIKES
 
@@ -412,6 +486,7 @@ class Page:
                 self.busy = True; threading.Thread(target=self.fetch, daemon=True).start()
             self.city, city_t = read(city_path)
             self.bikes, bikes_t = read(bikes_path)
+            self.city, self.bikes = clean_city(self.city), clean_bikes(self.bikes)
         else:
             city_t = bikes_t = 0
         if self.view != self.home and time.time() - self.touched > IDLE:   # nobody's touched it for a while
@@ -459,6 +534,19 @@ def check():
     for view, _ in VIEWS:
         assert draw(now, view, *HIVE76, 1000, SAMPLE["streets"], holes, SAMPLE["bikes"]).size == SCREEN, f"{view} with holes"
     assert spot({"lat": None, "lon": 1}) is None and spot({"lat": "x", "lon": 1}) is None and spot({"lat": 1, "lon": 2}) == (1, 2)
+    # odd data is cleaned before it's drawn: wrong types, missing fields, huge numbers, empty lists, text of any length
+    odd = {"city": {"reports": [{"service_name": None, "t": "2026-10-15T15:00:00Z", "lat": "x", "lon": 1e9}, {"t": 12}, "x"] + SAMPLE["city"]["reports"],
+                    "permits": []},
+           "bikes": {"stations": [{"name": "Ω" * 300, "lat": 1e9, "lon": 0}, {"name": "far", "lat": "39.98", "lon": -75.13, "bikes": "12", "docks": 10 ** 9, "open": 1},
+                                  {"lat": 1, "lon": 2}]}}
+    assert clean_city({"reports": 1, "permits": []}) is None and clean_bikes([]) is None and clean_city(None) is None
+    assert [r["service_name"] for r in clean_city(odd["city"])["reports"]] == ["", "Abandoned Vehicle", "Sanitation Violation"]
+    assert clean_city(SAMPLE["city"]) == dict(SAMPLE["city"]) and clean_bikes(SAMPLE["bikes"]) == SAMPLE["bikes"], "good data comes through as it was"
+    st = clean_bikes(odd["bikes"])["stations"]
+    assert len(st) == 1 and (st[0]["bikes"], st[0]["docks"], st[0]["ebikes"], st[0]["open"]) == (12, 9999, None, None)
+    for view, _ in VIEWS:
+        assert Page(view=view, data=odd).background(now)[1].size == SCREEN, f"{view} with odd data"
+        assert Page(view=view, data=[]).background(now)[1].size == SCREEN, f"{view} with data that isn't a dict"
     # the age: updated hh:mm, then amber when old
     fresh, old = (draw(now, "all", *HIVE76, 1000, None, SAMPLE["city"], SAMPLE["bikes"]),
                   draw(now, "all", *HIVE76, 1000, None, dict(SAMPLE["city"], fetched="2026-10-15T09:00:00"), SAMPLE["bikes"]))
@@ -574,7 +662,13 @@ def check():
     assert seattle.caches()[1][2]()["stations"] == [], "no bike share: no stations, and nothing fetched"
     assert "-" not in os.path.basename(Page().caches()[0][0]).split("_")[-1], "today's caches keep today's names"
     assert Page(reports=None).caches()[0][0] != Page().caches()[0][0], "and another source gets its own"
-    for bad in ({"bikes": "http://gbfs.example.org/"}, {"reports": "ftp://x"}, {"permits": "https://permits.example.org"}):
+    sf, mine = Page(city="san-francisco"), Page(city="san-francisco", lat=37.8, bikes=None)
+    assert sf.where["area"] == "San Francisco" and sf.where["city"] == "mobile311.sfgov.org" and sf.where["bike_share"] == "BAY WHEELS"
+    assert (mine.lat, sf.lon, mine.sources["bikes"], mine.sources["reports"]) == (37.8, -122.4193, None, sf.sources["reports"]), \
+        "a city fills in what the playlist doesn't say, and what it says wins"
+    assert Page(city="philadelphia").caches()[0][0] == Page().caches()[0][0] and Page().where["place"] == "HIVE76", "Philly as before"
+    assert all(c["bikes"] is None or c["bikes"].startswith("https://") for c in CITIES.values())
+    for bad in ({"bikes": "http://gbfs.example.org/"}, {"reports": "ftp://x"}, {"permits": "https://permits.example.org"}, {"city": "atlantis"}):
         try:
             Page(**bad)
         except AssertionError:

@@ -5,6 +5,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 Environment=KIOSK_HOST=kiosk@kiosk.local
+Environment="DESKFEED_OWNERS="
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
 # The key can only write ~/.cache/kiosk/desk.json on the Pi (see README.md), so whatever command we send is ignored.
 # $$ is a literal $ for the shell; systemd would expand a single one itself.

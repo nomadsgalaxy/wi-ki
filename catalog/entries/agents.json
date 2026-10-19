@@ -2,7 +2,7 @@
  "name": "agents",
  "kind": "page",
  "home": "public",
- "about": "how much of each AI plan I've used, and what my herdr workspaces are doing. The owner will pick what it shows, but the code doesn't do that yet. Needs the desk feed (feed/deskfeed.py), with herdr and KodexBar, on the desktop it shows: feed/README.md has the steps.",
+ "about": "what a desktop's herdr workspaces are doing, and, if it has KodexBar, how much of each AI plan it's used. Needs the desk feed (feed/deskfeed.py) on that desktop: feed/README.md has the steps.",
  "found": {
   "main": "ec7979"
  },
@@ -16,11 +16,26 @@
   "secrets": []
  },
  "settings": {
-  "feed": "~/.cache/kiosk/desk.json"
+  "feed": "~/.cache/kiosk/desk.json",
+  "plans": "auto"
  },
  "form": {
   "feed": {
    "type": "internal"
+  },
+  "plans": {
+   "type": "choice",
+   "label": "Plan usage",
+   "of": [
+    [
+     "",
+     "when the desktop has KodexBar"
+    ],
+    [
+     "off",
+     "never: herdr only"
+    ]
+   ]
   }
  },
  "ask": [
