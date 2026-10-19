@@ -32,7 +32,10 @@ p{{margin:.5em 0}}small,.dim,th{{color:{DUST}}}a{{color:{CYAN}}}
 .note{{color:{AMBER}}}.note:empty{{display:none}}.note::before{{content:"! " / ""}}.ok{{color:{GREEN}}}.bad{{color:{RED}}}
 button{{font:inherit;color:{CYAN};background:none;border:0;padding:.45em .6ch;min-height:2.75em;cursor:pointer}}
 button::before{{content:"[" / ""}}button::after{{content:"]" / ""}}
-button:hover{{background:{CYAN};color:{BG}}}button.danger{{color:{RED}}}button.danger:hover{{background:{RED};color:{BG}}}
+button:hover{{background:{CYAN};color:{BG}}}
+a.btn{{text-decoration:none;padding:.45em .6ch;display:inline-block}}a.btn::before{{content:"[" / ""}}a.btn::after{{content:"]" / ""}}
+a.btn:hover{{background:{CYAN};color:{BG}}}.sub{{grid-column:1/-1;margin-top:.6em}}.sub fieldset{{border-color:{CYAN}}}
+form.go a{{margin-left:1ch}}button.danger{{color:{RED}}}button.danger:hover{{background:{RED};color:{BG}}}
 :focus-visible{{outline:2px solid {AMBER};outline-offset:2px}}
 form.go button,button.go{{color:{BG};background:{CYAN};padding:.45em 2ch;margin-top:.6em}}
 input,select{{font:inherit;color:{INK};background:{BG};border:1px solid {DUST};padding:.45em 1ch;width:100%;min-height:2.75em}}
