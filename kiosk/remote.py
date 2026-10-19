@@ -14,8 +14,9 @@ Every message is a 12-byte header (kind, a, payload length) and its payload:
   TRAN  a = the length of the transition's name; the payload is the name, then the whole frame, compressed
   PING  nothing
   SHOW  a page change, before the server draws it: the payload is the page's name. Both sides keep each page's last
-        frame (what the Pi had on screen when it left that page), so with a = 1 the Pi puts its copy up at once, and
-        what the server sends next is only what's changed since: a touch doesn't wait for the page to be drawn and sent
+        frame (what the Pi had on screen when it left that page), so with a = 1 the Pi puts its copy up at once (2 and 3:
+        slides it in, for a swipe to the next page or the last; see transitions.SLIDES), and what the server sends next
+        is only what's changed since: a touch doesn't wait for the page to be drawn and sent
 and one the Pi sends the other way:
   TUCH  a touch on the Pi's screen, as JSON (see kiosk.py's TOUCH): the server hands it to the page it's drawing
 
@@ -131,27 +132,33 @@ class Server:
     def visible(self):
         return True
 
-    def page(self, name, instant):
+    def page(self, name, instant, theme=None):
         """kiosk.py's main(), as a new page comes up: tell the Pi (SHOW), and on an instant change (a touch, no
-        transition) have it put up its own copy of the page's last frame, if it has one"""
+        transition) have it put up its own copy of the page's last frame, if it has one, or slide it in for a swipe
+        (theme: one of transitions.SLIDES). True if the Pi's doing that, so there's nothing for main() to show yet."""
         if self.conn and self.current is not None and self.sent is not None:
             self.kept[self.current] = self.sent   # what the Pi has on screen now, which it keeps too
         up = instant and name in self.kept
-        if self.conn and self.send(b"SHOW", int(up), name.encode()) and up:
+        how = (2 if transitions.SLIDES.get(theme) == 1 else 3) if up and theme in transitions.SLIDES else int(up)
+        shown = bool(self.conn) and self.send(b"SHOW", how, name.encode()) and up
+        if shown:
             self.sent = self.kept[name]
+            if how > 1:   # the Pi's sliding: what changed can wait till it's done
+                self.quiet = time.time() + transitions.SLIDE + 0.2
         self.current = name
+        return shown
 
-    def play(self, new):
+    def play(self, new, theme=None):
         """a page change: the Pi plays the transition into new, and the server waits it out before sending more"""
         self.mm[:] = new
         if self.conn:
-            name = next(transitions.ORDER)
+            name = theme or next(transitions.ORDER)
             if self.send(b"TRAN", len(name), name.encode() + zlib.compress(new, 1)):
                 self.sent = bytes(new)
                 # the theme's own length if it's loaded here; if not (a server doesn't load them), the usual one: a
                 # longer theme's frames just wait on the Pi, which reads the next message once the transition's done
-                module = transitions.THEMES[name]
-                self.quiet = time.time() + getattr(module, "SECONDS", transitions.SECONDS) + 0.5
+                seconds = transitions.SLIDE if name in transitions.SLIDES else getattr(transitions.THEMES[name], "SECONDS", transitions.SECONDS)
+                self.quiet = time.time() + seconds + 0.5
 
     def flush(self):
         """after a frame: send the Pi what changed, or a ping if it's been a while"""
@@ -232,7 +239,10 @@ def client(address, mm, play=transitions.play, stop=None, touch=None, wake=None)
                 kept[current] = bytes(mm)
             current = payload.decode()
             if a and current in kept:
-                mm[:] = kept[current]
+                if a == 1:
+                    mm[:] = kept[current]
+                else:   # a swipe: slide it in, the way the finger went
+                    play(mm, kept[current], "slide-next" if a == 2 else "slide-prev")
         if stop and stop():
             sock.close()
             return
@@ -321,6 +331,10 @@ def check():
     server.mm[:] = bytes([1]) * SIZE; server.mm[5] = 9; server.flush()
     assert settle(server.mm) and sends == [b"SHOW", b"RECT"], "and then only what changed"
     server.send = real
+    seen.clear()
+    assert server.page("b", True, "slide-prev") and settle(bytes([2]) * SIZE), "a swipe back to b: the Pi slides in its copy"
+    assert seen == ["slide-prev"], "the way the finger went"
+    assert not server.page("c", True, "slide-next"), "a page the Pi hasn't had: nothing to slide yet, main() does it once drawn"
     done.set(); server.mm[0:2] = b"\x0c\x0c"; server.flush(); pi.join(5)
     server.listener.close()
     print("remote: ok")
