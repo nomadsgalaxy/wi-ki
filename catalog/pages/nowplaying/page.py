@@ -9,7 +9,7 @@ With nothing playing, active() is False and the rotation skips the page (unless 
 
 Options (in playlist.json): folder, where the sink writes (default /dev/shm/kiosk-nowplaying).
 """
-import base64, io, json, os, time
+import base64, io, json, math, os, struct, time, zlib
 from datetime import datetime
 from PIL import Image, ImageDraw
 
@@ -30,6 +30,48 @@ def gradient(h):
         a, b, k = (O, B, f * 2) if f < 0.5 else (B, M, f * 2 - 1)
         col.putpixel((0, y), tuple(round(a[i] + (b[i] - a[i]) * k) for i in range(3)))
     return col
+
+
+def number(v, hi, default=0):
+    """v as a number between 0 and hi, or default if it isn't one (a numeric string counts, NaN and infinity don't)"""
+    try:
+        v = v if isinstance(v, (int, float)) else float(v)
+    except (TypeError, ValueError):
+        return default
+    return default if isinstance(v, bool) or not math.isfinite(v) else max(0, min(hi, v))
+
+
+def read_cover(art):
+    """the cover from its base64 PNG as an ART x ART picture, or None if it isn't a usable one"""
+    if not isinstance(art, str) or len(art) > 400_000:
+        return None
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(art)))
+        return img.convert("RGB").resize((ART, ART)) if max(img.size) <= 2048 else None
+    except (OSError, ValueError, SyntaxError, EOFError, struct.error, zlib.error, Image.DecompressionBombError):
+        return None   # a broken picture is just no picture
+
+
+def clean_track(raw):
+    """track.json as the page draws it: texts cut to fit, numbers in range, the lyrics in time order without any broken
+    line, the cover decoded (or None). None, the nothing playing page, if it isn't a track at all."""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    string = lambda k, n=200: raw[k][:n] if isinstance(raw.get(k), str) else ""
+    lines = [(number(l[0], 1e6, None), l[1][:200]) for l in raw["lyrics"] if isinstance(l, (list, tuple)) and len(l) > 1
+             and isinstance(l[1], str)][:1000] if isinstance(raw.get("lyrics"), list) else []
+    return {"title": string("title"), "artist": string("artist"), "album": string("album"), "player": string("player", 24),
+            "length": number(raw.get("length"), 1e5), "cover": read_cover(raw.get("art")),
+            "lyrics": sorted([l for l in lines if l[0] is not None], key=lambda l: l[0])}
+
+
+def clean_frame(raw):
+    """frame.json as the page uses it: up to 48 levels from 0 to 64, a position, whether it's playing. None if it isn't one."""
+    if not isinstance(raw, dict):
+        return None
+    levels = raw.get("levels")
+    return {"levels": [number(v, 64) for v in levels[:48]] if isinstance(levels, list) else [],
+            "pos": number(raw.get("pos"), 1e6), "playing": raw.get("playing") is True}
 
 
 def mmss(s):
@@ -101,14 +143,8 @@ def draw(now, track):
     """everything that only changes with the song (or the minute), 1920x515 RGB"""
     img = Image.new("RGB", SCREEN, BG); d = ImageDraw.Draw(img)
     d.rectangle((15, 17, 16 + ART * 4, 18 + ART * 4), outline=RULE)
-    cover = None
-    if track and track.get("art"):
-        try:
-            cover = Image.open(io.BytesIO(base64.b64decode(track["art"]))).convert("RGB").resize((ART, ART))
-        except Exception:
-            cover = None   # a broken picture is just no picture
-    if cover:
-        img.paste(cover.resize((ART * 4, ART * 4), Image.NEAREST), (16, 18))
+    if track and track["cover"]:
+        img.paste(track["cover"].resize((ART * 4, ART * 4), Image.NEAREST), (16, 18))
     else:
         d.rectangle((16, 18, 15 + ART * 4, 17 + ART * 4), fill=RAISED)
         text(img, (16 + ART * 2 - 32, 18 + ART * 2 - 8), "no cover", D, scale=1)
@@ -146,7 +182,7 @@ class Page:
         try:
             if time.time() - os.path.getmtime(self.path("frame.json")) > STALE:
                 return None
-            return json.load(open(self.path("frame.json")))
+            return clean_frame(json.load(open(self.path("frame.json"))))
         except (OSError, ValueError):
             return None
 
@@ -163,7 +199,7 @@ class Page:
         if mtime != self.track_mtime:
             self.track_mtime = mtime
             try:
-                self.track = json.load(open(self.path("track.json")))
+                self.track = clean_track(json.load(open(self.path("track.json"))))
             except (OSError, ValueError):
                 self.track = None
         key = (self.track_mtime, now.minute)
@@ -224,8 +260,14 @@ def check():
     assert lyric_at(SAMPLE["lyrics"], 5) == -1 and lyric_at(SAMPLE["lyrics"], 15) == 1 and lyric_at(SAMPLE["lyrics"], 99) == 2
     assert mmss(157) == "2:37" and gradient(10).getpixel((0, 9)) == O and gradient(11).getpixel((0, 0)) == M
     now = datetime(2026, 10, 14, 23, 50)
-    for track in (dict(SAMPLE, art=sample_art()), dict(SAMPLE, art="not a png"), None, dict(SAMPLE, title="x" * 90)):
-        assert draw(now, track).size == SCREEN, "draws with, without and with a broken cover"
+    odd = dict(SAMPLE, art=sample_art(), lyrics=[[5, "ok"], [1, "first"], [None, "x"], ["3", 4], "no", [2]], length="x")
+    assert [l[1] for l in clean_track(odd)["lyrics"]] == ["first", "ok"] and clean_track(odd)["length"] == 0
+    assert clean_track({}) is None and clean_track([1]) is None and clean_track({"title": None})["title"] == ""
+    assert clean_track(dict(SAMPLE, art="not a png"))["cover"] is None and clean_track(dict(SAMPLE, lyrics=None))["lyrics"] == []
+    assert clean_frame({"levels": [99, None, "5"], "pos": -2, "playing": "yes"}) == {"levels": [64, 0, 5], "pos": 0, "playing": False}
+    assert clean_frame({}) == {"levels": [], "pos": 0, "playing": False} and clean_frame(None) is None
+    for track in (dict(SAMPLE, art=sample_art()), dict(SAMPLE, art="not a png"), None, dict(SAMPLE, title="x" * 90), odd, {"title": None}):
+        assert draw(now, clean_track(track)).size == SCREEN, "draws with, without and with a broken cover"
     folder = tempfile.mkdtemp()
     page = Page(folder)
     assert not page.active() and page.background(now)[1].size == SCREEN, "nothing playing: skipped, but draws"

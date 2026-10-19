@@ -1,10 +1,10 @@
-"""The sports page: every Philadelphia team at once. A column each for the Eagles, Phillies, Flyers, Sixers and
-Union, in the team's own colours with its logo in pixels and its record. During a game: the score, both logos, the
+"""The sports page: up to five teams at once, from the NFL, MLB, NHL, NBA and MLS, picked in the setup page (the
+teams option, "league/ESPN id" each; every Philadelphia team unless it says otherwise). A column each, in the team's own colours with its logo in pixels and its record. During a game: the score, both logos, the
 period or inning and the clock, and a pulsing LIVE dot (the page's moving part). Otherwise: the next game (who, home or
 away, when, on what channel) and how the last one went. Off-season, it says so, and when they're back.
 
 From ESPN's public site API (no key): each team, and its schedule for the last result. It fetches every 10 minutes, and
-every 30 seconds while a Philly team is playing or about to, into CACHE, which every renderer shares. A failed fetch
+every 30 seconds while one of them is playing or about to, into CACHE (one per set of teams), which every renderer shares. A failed fetch
 keeps the last one. Needs (for the catalog): site.api.espn.com for the data and a.espncdn.com (ESPN's logo CDN) for the
 logos, https only and nothing else. A redirect is checked at every hop, for the data and the logos alike. The logos are
 ESPN's, shrunk to pixels once and cached in LOGOS. The teams' colours are ESPN's for each team, and only this page uses
@@ -18,8 +18,9 @@ from PIL import Image, ImageDraw
 from kit import SCREEN, text, clock, packed, local
 
 API = "https://site.api.espn.com/apis/site/v2/sports/"
-TEAMS = [("football/nfl", "phi", "EAGLES"), ("baseball/mlb", "phi", "PHILLIES"), ("hockey/nhl", "phi", "FLYERS"),
-         ("basketball/nba", "phi", "SIXERS"), ("soccer/usa.1", "10739", "UNION")]
+LEAGUES = {"nfl": "football/nfl", "mlb": "baseball/mlb", "nhl": "hockey/nhl", "nba": "basketball/nba", "mls": "soccer/usa.1"}
+TEAMS = ["nfl/21", "mlb/22", "nhl/15", "nba/20", "mls/10739"]   # the Eagles, Phillies, Flyers, Sixers and Union
+MOST = 5   # columns across the screen
 CACHE = os.path.expanduser("~/.cache/kiosk/sports.json")
 LOGOS = os.path.expanduser("~/.cache/kiosk/logos")
 EVERY, LIVE_EVERY = 600, 30
@@ -29,10 +30,8 @@ API_HOSTS = ("site.api.espn.com",)
 LOGO_MAX = 1 << 20   # bytes; a team logo is a few KB
 LOGO_PIXELS = 1024 * 1024   # decoded size; a 500 x 500 logo is a quarter of it, a tiny PNG can claim 50000 x 50000
 LOGO_SIDE = 1024   # and each side, so 2048 x 512 (the same total) doesn't pass
-TEAM_KEYS = {"label", "id", "color", "alt", "logo", "record", "next", "last"}
-GAME_KEYS = {"when", "state", "detail", "home", "them", "them_logo", "us_score", "them_score", "won", "tv"}
 INK, WHITE, SOFT, LIVE = (8, 9, 12), (240, 240, 240), (190, 192, 200), (255, 64, 64)
-COL = SCREEN[0] // len(TEAMS)
+COL = SCREEN[0] // MOST
 UA = {"User-Agent": "wi-ki sports (github.com/nomadsgalaxy/wi-ki)"}
 
 
@@ -69,19 +68,28 @@ def game(ev, us):
             "tv": ((tvs[0].get("media") or {}).get("shortName") if tvs else None)}
 
 
-def fetch():
+def picked(teams):
+    """the teams option -> the ones it can show ("league/id", at most MOST), or every Philly team if it names none"""
+    ok = [k for k in teams if isinstance(k, str) and re.fullmatch(r"[a-z]+/[0-9]{1,8}", k) and k.split("/")[0] in LEAGUES] \
+        if isinstance(teams, list) else []
+    return list(dict.fromkeys(ok))[:MOST] or TEAMS
+
+
+def fetch(teams=TEAMS):
     """every team: its name, colours, logo, record, the game on or next, and the last result"""
-    teams = []
-    for sport, key, label in TEAMS:
-        t = get(f"{API}{sport}/teams/{key}")["team"]
+    out = []
+    for key in teams:
+        league, tid = key.split("/")
+        t = get(f"{API}{LEAGUES[league]}/teams/{tid}")["team"]
+        label = ((t.get("nickname") if league == "mls" else t.get("name")) or t.get("shortDisplayName") or "?").upper()
         nxt = (t.get("nextEvent") or [None])[0]
-        events = get(f"{API}{sport}/teams/{t['id']}/schedule").get("events", [])
+        events = get(f"{API}{LEAGUES[league]}/teams/{t['id']}/schedule").get("events", [])
         done = [e for e in events if e["competitions"][0]["status"]["type"].get("completed")]
-        teams.append({"label": label, "id": t["id"], "color": t.get("color"), "alt": t.get("alternateColor"),
+        out.append({"label": label, "abbr": t.get("abbreviation", ""), "id": t["id"], "color": t.get("color"), "alt": t.get("alternateColor"),
                       "logo": (t.get("logos") or [{}])[0].get("href"),
                       "record": ((t.get("record") or {}).get("items") or [{}])[0].get("summary", ""),
                       "next": game(nxt, t["id"]) if nxt else None, "last": game(done[-1], t["id"]) if done else None})
-    return {"teams": teams, "fetched": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    return {"teams": out, "fetched": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
 def logo_ok(url, hosts=LOGO_HOSTS):
@@ -152,23 +160,43 @@ def aware(iso):
     return True
 
 
-def valid(data):
-    """whether a cache file has the shape draw() reads; a stale or damaged one is ignored"""
+def clean(data):
+    """the data in a shape draw() can take, or None if there's none to show (not a dict, no usable fetched time, no teams).
+    Text is made text and cut to what fits its place, scores are held to 0-999, a game that can't be placed in time is
+    dropped, and a field that's missing or the wrong type takes a plain default. Good data comes out as it went in"""
+    def text_of(v, n, default=""):
+        return v[:n] if isinstance(v, str) else default
+
+    def text_or_none(v, n):
+        return v[:n] if isinstance(v, str) else None
+
+    def points(v):
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf"):
+            return str(max(0, min(999, int(v))))
+        return text_or_none(v, 4)
+
+    def game_of(g):
+        if not isinstance(g, dict):
+            return None
+        try:
+            aware(g["when"])
+        except (KeyError, ValueError, AttributeError, TypeError):
+            return None   # without its time, a game can't be placed
+        return {"when": g["when"], "state": text_of(g.get("state"), 8, "pre"), "detail": text_of(g.get("detail"), 40),
+                "home": g.get("home") is True, "them": text_of(g.get("them"), 6, "?"), "them_logo": text_or_none(g.get("them_logo"), 300),
+                "us_score": points(g.get("us_score")), "them_score": points(g.get("them_score")),
+                "won": g["won"] if isinstance(g.get("won"), bool) else None, "tv": text_or_none(g.get("tv"), 40)}
+
+    if not isinstance(data, dict) or not isinstance(data.get("teams"), list):
+        return None
     try:
         aware(data["fetched"])
-        teams = data["teams"]
-        assert isinstance(teams, list) and teams
-        for t in teams:
-            assert TEAM_KEYS <= t.keys() and isinstance(t["label"], str) and isinstance(t["record"], str)
-            assert all(t[k] is None or isinstance(t[k], str) for k in ("logo", "color", "alt"))
-            for g in (t["next"], t["last"]):
-                if g is not None:
-                    assert GAME_KEYS <= g.keys() and isinstance(g["them"], str) and isinstance(g["state"], str)
-                    assert isinstance(g["detail"], str) and aware(g["when"])
-                    assert all(g[k] is None or isinstance(g[k], str) for k in ("them_logo", "tv"))
-        return True
-    except (KeyError, TypeError, ValueError, AttributeError, AssertionError):
-        return False
+    except (KeyError, ValueError, AttributeError, TypeError):
+        return None
+    teams = [{"label": text_of(t.get("label"), 12, "?"), "abbr": text_of(t.get("abbr"), 4), "id": str(t.get("id", ""))[:20], "color": text_or_none(t.get("color"), 6),
+              "alt": text_or_none(t.get("alt"), 6), "logo": text_or_none(t.get("logo"), 300), "record": text_of(t.get("record"), 12),
+              "next": game_of(t.get("next")), "last": game_of(t.get("last"))} for t in data["teams"] if isinstance(t, dict)]
+    return {"teams": teams[:MOST], "fetched": data["fetched"]} if teams else None
 
 
 def when(iso, now):
@@ -204,7 +232,7 @@ def column(now, team, logos):
         text(img, (18, y), "LIVE", LIVE, scale=2)
         text(img, (18 + 5 * 16, y), g["detail"][:(COL - 110) // 16], WHITE, scale=2)
         opp = logos.get(g.get("them_logo"))
-        for row, (who, pts, mk) in enumerate((("PHI", g["us_score"], mark), (g["them"], g["them_score"], opp))):
+        for row, (who, pts, mk) in enumerate(((team.get("abbr") or team["label"][:3], g["us_score"], mark), (g["them"], g["them_score"], opp))):
             ry = y + 48 + row * 84
             m = pixel(mk, 64) if mk else placeholder(who, 64)
             img.paste(m, (18, ry), m)
@@ -236,19 +264,24 @@ def column(now, team, logos):
     return img
 
 
+def left(data):
+    """where the first column goes: fewer teams than MOST sit in the middle"""
+    return (SCREEN[0] - len(data["teams"][:MOST]) * COL) // 2
+
+
 def draw(now, data, logos):
     img = Image.new("RGB", SCREEN, INK)
     if not data:
         text(img, (40, 200), "asking ESPN...", WHITE, scale=2)
         return img
-    for i, team in enumerate(data["teams"][:len(TEAMS)]):
-        img.paste(column(now, team, logos), (i * COL, 0))
+    for i, team in enumerate(data["teams"][:MOST]):
+        img.paste(column(now, team, logos), (left(data) + i * COL, 0))
     text(img, (SCREEN[0] - 12, SCREEN[1] - 14), f"ESPN · {clock(local(data['fetched']))}", (90, 92, 100), scale=1, right=True)
     return img
 
 
 def live(data):
-    """whether a Philly team is playing, or starts within 15 minutes"""
+    """whether one of the teams is playing, or starts within 15 minutes"""
     for t in (data or {}).get("teams", []):
         g = t.get("next")
         if g and (g["state"] == "in" or g["state"] == "pre" and
@@ -262,8 +295,9 @@ class Page:
     name, seconds = "sports", 20
     fps = 2   # the LIVE dot
 
-    def __init__(self, data=None):
-        self.fixed, self.data = data is not None, data
+    def __init__(self, data=None, teams=None):
+        self.fixed, self.data, self.teams = data is not None, clean(data), picked(teams)
+        self.cache = CACHE if self.teams == TEAMS else CACHE[:-5] + "-" + "-".join(k.replace("/", "") for k in self.teams) + ".json"
         self.busy, self.mtime, self.logos, self.bg, self.last = False, None, {}, (None, None), None
         self.tried, self.loading, self.missed = 0, False, {}   # when we last asked ESPN; logos in hand; when each missing logo was tried
 
@@ -276,11 +310,11 @@ class Page:
     def fetch(self):
         self.tried = time.time()
         try:
-            data = fetch()
-            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-            with open(CACHE + ".tmp", "w") as f:
+            data = fetch(self.teams)
+            os.makedirs(os.path.dirname(self.cache), exist_ok=True)
+            with open(self.cache + ".tmp", "w") as f:
                 json.dump(data, f)
-            os.replace(CACHE + ".tmp", CACHE)
+            os.replace(self.cache + ".tmp", self.cache)
         except Exception as e:
             print(f"sports: {e}", flush=True)
         self.busy = False
@@ -305,16 +339,15 @@ class Page:
 
     def background(self, now):
         if not self.fixed:
-            mtime = os.path.getmtime(CACHE) if os.path.exists(CACHE) else None
+            mtime = os.path.getmtime(self.cache) if os.path.exists(self.cache) else None
             if not self.busy and self.due(mtime, time.time()):
                 self.busy = True; threading.Thread(target=self.fetch, daemon=True).start()
             if mtime != self.mtime:
                 self.mtime = mtime
                 try:
-                    with open(CACHE) as f:
+                    with open(self.cache) as f:
                         data = json.load(f)
-                    if valid(data):   # else keep the last good one
-                        self.data = data
+                    self.data = clean(data) or self.data   # else keep the last good one
                 except (OSError, ValueError):
                     pass
         if self.data and not self.loading and self.pending():
@@ -337,7 +370,7 @@ class Page:
         for i, team in enumerate((self.data or {}).get("teams", [])):
             if (team.get("next") or {}).get("state") == "in":
                 dot = Image.new("RGB", (14, 14), LIVE if int(t) % 2 == 0 else INK)
-                out.append((packed(dot), (i * COL + COL - 30, 172)))
+                out.append((packed(dot), (left(self.data) + i * COL + COL - 30, 172)))
         return out
 
 
@@ -346,15 +379,15 @@ def _ev(state, detail, us, them, won=None, date="2026-10-15T23:30Z"):
             "us_score": us, "them_score": them, "won": won, "tv": "NBC Sports Phil"}
 
 
-SAMPLE = {"teams": [{"label": "EAGLES", "id": "21", "color": "06424d", "alt": "000000", "logo": None, "record": "2-3",
+SAMPLE = {"teams": [{"label": "EAGLES", "abbr": "PHI", "id": "21", "color": "06424d", "alt": "000000", "logo": None, "record": "2-3",
                      "next": _ev("pre", "10/18 - 1:00 PM EDT", None, None, date="2026-10-18T17:00Z"), "last": _ev("post", "Final", "17", "24", False)},
-                    {"label": "PHILLIES", "id": "22", "color": "e81828", "alt": "003278", "logo": None, "record": "88-74",
+                    {"label": "PHILLIES", "abbr": "PHI", "id": "22", "color": "e81828", "alt": "003278", "logo": None, "record": "88-74",
                      "next": _ev("pre", "TBD", None, None, date="2027-02-19T05:00Z"), "last": _ev("post", "Final", "3", "6", False)},
-                    {"label": "FLYERS", "id": "15", "color": "fe5823", "alt": "000000", "logo": None, "record": "0-5",
+                    {"label": "FLYERS", "abbr": "PHI", "id": "15", "color": "fe5823", "alt": "000000", "logo": None, "record": "0-5",
                      "next": _ev("in", "2nd 12:01", "2", "1"), "last": _ev("post", "Final/SO", "2", "3", False)},
-                    {"label": "SIXERS", "id": "20", "color": "1d428a", "alt": "e01234", "logo": None, "record": "1-2",
+                    {"label": "SIXERS", "abbr": "PHI", "id": "20", "color": "1d428a", "alt": "e01234", "logo": None, "record": "1-2",
                      "next": _ev("pre", "10/16 - 7:00 PM EDT", None, None, date="2026-10-16T23:00Z"), "last": None},
-                    {"label": "UNION", "id": "10739", "color": "051f31", "alt": "b19b69", "logo": None, "record": "13-6-10",
+                    {"label": "UNION", "abbr": "PHI", "id": "10739", "color": "051f31", "alt": "b19b69", "logo": None, "record": "13-6-10",
                      "next": _ev("pre", "10/17", None, None, date="2026-10-17T18:30Z"), "last": _ev("post", "FT", "2", "0", True)}],
           "fetched": "2026-10-15T21:40:00+00:00"}
 
@@ -370,15 +403,18 @@ def check():
     pl = placeholder("PHI", 64)
     assert pl.size == (64, 64) and pl.getpixel((32, 32))[3] == 255 and pl.getpixel((0, 0))[3] == 0, "a crest, not blank"
     assert placeholder("", 64).size == (64, 64) and placeholder("DETROIT", 20).size == (20, 20)
-    assert valid(SAMPLE) and not valid(None) and not valid({}) and not valid({"teams": [], "fetched": "2026-10-15T21:40:00+00:00"})
-    assert not valid(dict(SAMPLE, teams=[{"label": "X"}])) and not valid(dict(SAMPLE, teams="nope")) and not valid(dict(SAMPLE, fetched="soon"))
-    assert not valid(dict(SAMPLE, teams=[dict(SAMPLE["teams"][0], next={"when": "now"})])), "a game missing its fields"
-    assert not valid(dict(SAMPLE, teams=[dict(SAMPLE["teams"][0], last=dict(SAMPLE["teams"][0]["last"], when="whenever"))]))
+    assert clean(SAMPLE) == SAMPLE and not clean(None) and not clean({}) and not clean({"teams": [], "fetched": "2026-10-15T21:40:00+00:00"})
+    assert not clean(dict(SAMPLE, teams="nope")) and not clean(dict(SAMPLE, fetched="soon")) and not clean(dict(SAMPLE, teams=[None, 5]))
+    assert clean(dict(SAMPLE, teams=[{"label": "X"}]))["teams"][0]["next"] is None, "a team missing its fields takes defaults"
     t0 = SAMPLE["teams"][0]
-    for bad in (dict(SAMPLE, fetched="2026-10-15T21:40:00"), dict(SAMPLE, teams=[dict(t0, logo=["x"])]), dict(SAMPLE, teams=[dict(t0, logo={"href": "x"})]),
+    assert clean(dict(SAMPLE, teams=[dict(t0, next={"when": "now"})]))["teams"][0]["next"] is None, "a game missing its fields"
+    assert clean(dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], when="whenever"))]))["teams"][0]["last"] is None
+    for bad in (dict(SAMPLE, fetched="2026-10-15T21:40:00"), dict(SAMPLE, teams=[dict(t0, logo=["x"])]), dict(SAMPLE, teams=[dict(t0, label=None, record=7)]),
                 dict(SAMPLE, teams=[dict(t0, next=dict(t0["next"], when="2026-10-18T17:00"))]), dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], them_logo=["x"]))]),
-                dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], tv=["NBC"]))])):
-        assert not valid(bad), "a naive time or a list/dict where a string goes would crash draw()"
+                dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], tv=["NBC"], us_score=10 ** 9, them="x" * 99))])):
+        assert draw(now, clean(bad), {}).size == SCREEN, "a naive time or a list/dict where a string goes is cleaned, not drawn"
+    last = clean(dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], tv=["NBC"], us_score=10 ** 9, them="x" * 99))]))["teams"][0]["last"]
+    assert (last["tv"], last["us_score"], last["them"]) == (None, "999", "xxxxxx"), "wrong types dropped, scores held, text cut"
     import tempfile
     class Reply(io.BytesIO):
         __enter__ = lambda self: self
@@ -441,7 +477,7 @@ def check():
                 assert pg.data["fetched"] == "2026-10-15T21:41:00+00:00", ("a good file is read", "a bad one is ignored")[i]
         finally:
             globals()["CACHE"] = real_cache
-    real_fetch, fetch = fetch, lambda: (_ for _ in ()).throw(OSError("ESPN is down (test)"))
+    real_fetch, fetch = fetch, lambda teams: (_ for _ in ()).throw(OSError("ESPN is down (test)"))
     try:
         late = Page(); late.fetch()
     finally:
@@ -466,12 +502,16 @@ def check():
     page = Page(data=SAMPLE)
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key
-    page.data = {"teams": [{"label": None}], "fetched": SAMPLE["fetched"]}   # a shape draw() can't take, past valid()
+    page.data = {"teams": [{"label": None}], "fetched": SAMPLE["fetched"]}   # a shape draw() can't take, past clean()
     key2, bad = page.background(now.replace(minute=41)); page.data = SAMPLE
     assert key2 != key and bad.size == bg.size and bad.tobytes() != bg.tobytes(), "a failed draw keeps the last frame, marked"
     marked = Page(data={"teams": [{"label": None}], "fetched": SAMPLE["fetched"]})
     assert marked.background(now)[1].size == bg.size, "and with no frame yet, a blank one"
     on, off = page.regions(now, 0), page.regions(now, 1)
+    assert picked(None) == TEAMS and picked(["nhl/15", "nhl/15", "xfl/1", "nba/../x", 7]) == ["nhl/15"] and len(picked(TEAMS * 2)) == MOST
+    one = Page(data=dict(SAMPLE, teams=SAMPLE["teams"][2:3]), teams=["nhl/15"])
+    assert one.cache.endswith("sports-nhl15.json") and Page().cache == CACHE, "a cache for each set of teams"
+    assert one.regions(now, 0)[0][1][0] == (SCREEN[0] - COL) // 2 + COL - 30, "one team sits in the middle, its dot with it"
     assert len(on) == 1 and on[0][1] == off[0][1] and on[0][0].tobytes() != off[0][0].tobytes(), "the Flyers' LIVE dot blinks"
 
 
