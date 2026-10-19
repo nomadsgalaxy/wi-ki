@@ -1,6 +1,6 @@
 # Wi-Ki: notes for coding agents
 
-What you need to work on the code without breaking the Pi. `docs/` covers setting up a kiosk, a render server and connectors, and `docs/develop.md` running, testing and deploying.
+What you need to work on the code without breaking the Pi. `docs/` covers setting up a kiosk, a render server and connectors, `docs/make.md` making a page or a transition (`catalog/catalog.py --new`, `kit.Simple`, `canvas.simple()`), and `docs/develop.md` running, testing and deploying.
 
 ## The machine
 

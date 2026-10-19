@@ -151,3 +151,19 @@ class Canvas:
         for r in self.dirty:
             self._copy(self.cur, (self.mm,), r)
         self.dirty = []
+
+
+def simple(shown):
+    """the easy way to make a transition: shown(t) gives the parts of the new page showing at t, from 0 (none of it) to
+    1 (all of it), as [(x, y, w, h)], and this turns it into frames(). A part stays shown once it is, so returning all
+    of what's showing is fine, but each rectangle costs a copy every frame, or one a row when it isn't the screen's
+    whole width: keep a frame under ~600. catalog/new/transition.py is one to start from."""
+    def frames(c, count):
+        c.bare()   # nothing to wipe: it only ever reveals
+        seen = set()
+        for k in range(count):
+            for r in shown(k / max(1, count - 1)):   # a lone frame is t=0; play() lands on the new page
+                if tuple(r) not in seen:   # a part already shown, exactly, costs nothing
+                    seen.add(tuple(r)); c.reveal(*r)
+            yield
+    return frames

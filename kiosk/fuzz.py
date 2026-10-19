@@ -7,7 +7,8 @@ feed file in a temporary folder), and started, drawn and moved on a few frames. 
 picture it hands the display is the screen's size, or fits on the screen where it's placed.
 
   fuzz.py              every page, the usual number of tries
-  fuzz.py PAGE [N]     one page, N tries, saying what went wrong in each
+  fuzz.py PAGE [N]     one page, N tries, saying what went wrong in each (any kit.Simple page, too: their check()
+                       runs 20 tries itself)
 """
 import copy, importlib, json, os, random, sys, tempfile, traceback, types
 from datetime import datetime, timedelta
@@ -59,6 +60,9 @@ def mangle(value, rnd, depth=0):
 def build(name, data, folder):
     """the page, built the way the display builds it, with data -> Page"""
     module = importlib.import_module(f"pages.{name}.page")
+    if name not in TAKES and issubclass(module.Page, kit.Simple):   # a Simple page is handed its data straight
+        page = module.Page(); page.every, page.data = 0, data
+        return page
     option, kind = TAKES[name]
     if kind is None:
         return module.Page(**{option: data})
@@ -77,6 +81,8 @@ def run(page, now):
     page.start(now)
     for t in (0, .5, 3, 30):
         _, bg = page.background(now + timedelta(seconds=t))   # (what it shows, the picture), as the display asks
+        if getattr(page, "failed", None):   # a Simple page shows its error rather than raising it
+            return page.failed
         if bg.size != kit.SCREEN:
             return f"its background is {bg.size}, not {kit.SCREEN}"
         for img, (x, y) in page.regions(now + timedelta(seconds=t), t) or []:
@@ -84,12 +90,13 @@ def run(page, now):
                 img = types.SimpleNamespace(width=w, height=len(img) // w // 2)
             if x < 0 or y < 0 or x + img.width > w or y + img.height > h:
                 return f"a region at ({x}, {y}), {img.width}x{img.height}, goes off the screen"
-    return None
+    return getattr(page, "failed", None)
 
 
 def fuzz(name, tries=TRIES, seed=19, say=False):
     """-> [(try, what went wrong)]"""
-    sample = importlib.import_module(f"pages.{name}.page").SAMPLE
+    module = importlib.import_module(f"pages.{name}.page")
+    sample = module.SAMPLE if hasattr(module, "SAMPLE") else module.Page.SAMPLE   # a Simple page keeps it on Page
     now, failed = datetime(2026, 10, 19, 9, 41), []
     for n in range(tries):
         rnd = random.Random(seed * 1000 + n)

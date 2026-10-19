@@ -30,6 +30,7 @@ tree (or blob, for a transition) of each version, by the line it's on.
                               needs a file.
   catalog.py --table          writes CATALOG.md from the files
   catalog.py --draft KIND N   prints a starting file for page or transition N, read from the code
+  catalog.py --new KIND N     starts page or transition N from catalog/new/ (docs/make.md), with its file here
   catalog.py --test           the self-test, on a made-up repo
 
 It reads origin/main, the remote-tracking branch, so fetch first.
@@ -38,6 +39,7 @@ import ast, glob, json, os, re, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "kiosk"))
 import form  # noqa: E402  the rules for "form", shared with the setup page
+from packs import NAME  # noqa: E402  what a pack can be called
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
@@ -54,6 +56,7 @@ MARKS = {"unchecked", "pass", "fail"}
 NOT_PUBLIC = re.compile(r"op://|prusa|\b[a-z0-9-]+\.local\b|\b10\.\d+\.\d+\.\d+|\b192\.168\.\d", re.I)
 HOST = re.compile(r"https?://([a-z0-9.-]+)|\b([a-z0-9-]+\.local)\b", re.I)
 ENGINE = {"__init__", "canvas"}   # the transitions' player and drawing, part of the core
+FRAMES = re.compile(r"^(def frames\(|frames = simple\()", re.M)
 FIXTURES = {"data", "planes", "w", "answer"}   # what a page's own check() hands it so it never fetches; never set in a playlist
 
 
@@ -139,8 +142,8 @@ def facts(repo, ref, kind, name):
     if kind == "page":
         page = files.get(f"catalog/pages/{name}/page.py", "")
         return obj, hosts, options(page) if page else {}, "def check(" in text, text, shapes(page) if page else {"bar"}
-    # the player's check() plays every theme it finds, so a transition with frames() is checked
-    return obj, hosts, {}, "def frames(" in text, text, {"bar"}   # canvas.py draws the bar
+    # the player's check() plays every theme it finds, so a transition with frames() (or simple()'s) is checked
+    return obj, hosts, {}, bool(FRAMES.search(text)), text, {"bar"}   # canvas.py draws the bar
 
 
 def problems(entry, lines):
@@ -252,6 +255,29 @@ def draft(kind, name, lines=LINES):
             "quality": {q: "unchecked" for q in sorted(QUALITY)}}
 
 
+def new(kind, name, root=REPO, folder=ENTRIES):
+    """start page or transition name from its template in catalog/new/, with a catalog file -> the files it wrote"""
+    if not NAME.fullmatch(name):
+        raise ValueError(f"{name!r}: a name is 2 to 31 lowercase letters, digits and _, starting with a letter")
+    code = os.path.join(root, "catalog", "pages", name, "page.py") if kind == "page" else \
+        os.path.join(root, "catalog", "transitions", name + ".py")
+    entry = os.path.join(folder, name + ".json")
+    if os.path.exists(os.path.dirname(code) if kind == "page" else code) or os.path.exists(entry) or name in ENGINE:
+        raise ValueError(f"{name}: there's already one called that")
+    os.makedirs(os.path.dirname(code), exist_ok=True)
+    open(code, "w").write(open(os.path.join(HERE, "new", kind + ".py")).read().replace("{name}", name))
+    written = [code]
+    if kind == "page":
+        written.append(os.path.join(os.path.dirname(code), "__init__.py"))
+        open(written[-1], "w").write("from .page import Page, check, preview   # noqa: F401\n")
+    blank = draft(kind, name, {})   # it's on no line yet, so this is a blank file; --check says what it still needs
+    blank["shapes"] = ["bar"]   # what the templates draw
+    if kind == "page":
+        blank["settings"] = options(open(code).read())
+    json.dump(blank, open(entry, "w"), indent=1); open(entry, "a").write("\n")
+    return written + [entry]
+
+
 def table(folder=ENTRIES):
     entries = load(folder)
     rows = ["# The kiosks' catalog", "",
@@ -356,6 +382,19 @@ def test():
         assert any("public, but one's version mentions home.local" in p for p in got), got
         assert set(everything(lines)) == {("page", "sky"), ("page", "moon"), ("transition", "rain"),
                                           ("transition", "snow")}, "a new page or transition is found; the engine isn't"
+        made = new("page", "kite", repo, folder) + new("transition", "wind", repo, folder)
+        assert [os.path.relpath(f, d) for f in made] == ["repo/catalog/pages/kite/page.py", "repo/catalog/pages/kite/__init__.py",
+                "catalog/kite.json", "repo/catalog/transitions/wind.py", "catalog/wind.json"], made
+        assert 'name, seconds = "kite", 20' in open(made[0]).read() and "{name}" not in open(made[3]).read()
+        assert load(folder)["kite"]["settings"] == {"title": None} and load(folder)["kite"]["shapes"] == ["bar"] and load(folder)["wind"]["kind"] == "transition"
+        for kind, name in (("page", "kite"), ("transition", "wind"), ("page", "Kite"), ("page", "k"), ("page", "../x"),
+                           ("transition", "canvas")):
+            try:
+                new(kind, name, repo, folder)
+                raise AssertionError(f"made {kind} {name}")
+            except ValueError:
+                pass   # one that's there already, or a name that can't be one
+        assert FRAMES.search("frames = simple(shown)\n") and FRAMES.search("def frames(c, count):") and not FRAMES.search("# def frames(")
         md = table(folder)
         assert "| sky | page | private | a test | one, on one `" in md and "api.example.org" in md, md
     print("catalog: ok")
@@ -371,6 +410,15 @@ if __name__ == "__main__":
         open(os.path.join(HERE, "CATALOG.md"), "w").write(table())
     elif len(a) == 3 and a[0] == "--draft" and a[1] in CHOICES["kind"]:
         print(json.dumps(draft(a[1], a[2]), indent=1))
+    elif len(a) == 3 and a[0] == "--new" and a[1] in CHOICES["kind"]:
+        try:
+            made = new(a[1], a[2])
+        except ValueError as e:
+            sys.exit(str(e))
+        print("made " + ", ".join(os.path.relpath(f) for f in made) + ". Next:\n"
+              f"  to look at it:      python3 -I kiosk/kiosk.py --png {a[2]} {a[2]}.png\n"
+              f"  before you push:    python3 -I kiosk/kiosk.py --check\n"
+              f"  its catalog file:   python3 -I catalog/catalog.py --check says what it still needs")
     elif a == ["--test"]:
         test()
     else:
