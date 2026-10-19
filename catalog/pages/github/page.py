@@ -1,7 +1,7 @@
-"""The GitHub page: one column each for Nomads Galaxy, Positron 3D and Hive76, with their open PRs and issues and the
-five repos pushed to most recently, each with its last commit.
+"""The GitHub page: a column for each of up to three owners (you and your orgs, or the ones DESKFEED_OWNERS names),
+with their open PRs and issues and the five repos pushed to most recently, each with its last commit.
 
-The Pi can't see private repos, so the data comes from my desktop: feed/deskfeed.py asks GitHub with gh and pushes
+The Pi can't see private repos, so the data comes from the desktop: feed/deskfeed.py asks GitHub with gh and pushes
 ~/.cache/kiosk/desk.json here (kit.Feed). Until that arrives the page says it's waiting.
 
 Options (in playlist.json): feed, the feed file (default ~/.cache/kiosk/desk.json).
@@ -15,7 +15,6 @@ from kit import SCREEN, O, W, G, D, A, BG, RULE, RAISED, Feed, local, masthead, 
 COLUMNS, TOP, MARGIN = 3, 98, 16
 COL_W = (SCREEN[0] - 2 * MARGIN) // COLUMNS
 ROW = 70
-BRAND = "nomadsgalaxy"   # the one owner drawn in Warp Cyan; partners keep plain Starlight (brand manual 8.2)
 
 
 def ago(when, now):
@@ -78,7 +77,7 @@ def draw(now, data, note=None):
         x0, y0 = MARGIN + i * COL_W, TOP
         x1, y1 = x0 + COL_W - 8, SCREEN[1] - 8
         d.rectangle((x0, y0, x1, y1), fill=RAISED, outline=RULE)
-        text(img, (x0 + 14, y0 + 10), owner["owner"].upper(), O if owner.get("login") == BRAND else W)
+        text(img, (x0 + 14, y0 + 10), owner["owner"].upper(), O if i == 0 else W)   # the first owner (your own) in Warp Cyan, the rest plain Starlight
         counts = f"{owner['prs']} PR · {owner['issues']} issues"
         text(img, (x1 - 14, y0 + 18), counts, G, scale=1, right=True)
         d.rectangle((x0 + 8, y0 + 50, x1 - 8, y0 + 50), fill=RULE)

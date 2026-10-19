@@ -33,6 +33,7 @@ printf 'restrict,command="python3 -I /home/kiosk/kiosk/pages/system/sink.py" %s\
 mkdir -p ~/.config/systemd/user
 for unit in deskfeed.service deskfeed.timer nowplaying.service sysfeed.service; do   # with this checkout's path and host
   sed -e "s|%h/wi-ki/feed|$here|g" -e "s|KIOSK_HOST=kiosk@kiosk.local|KIOSK_HOST=$host|" \
+    -e "s|DESKFEED_OWNERS=\"|DESKFEED_OWNERS=${DESKFEED_OWNERS:-}\"|" \
     "$here/$unit" > ~/.config/systemd/user/$unit
 done
 systemctl --user daemon-reload
