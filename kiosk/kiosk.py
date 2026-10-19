@@ -204,8 +204,8 @@ class Framebuffer:
     def visible(self):
         return active_vt() == "tty1"
 
-    def play(self, new):
-        transitions.play(self.mm, new)
+    def play(self, new, theme=None):
+        transitions.play(self.mm, new, theme)
 
     def flush(self):
         pass
@@ -234,7 +234,7 @@ def main(screen, until=None):
     index, since, shown, drawn, moving = -1, 0.0, None, {}, False
     last = {}   # each page's last whole frame, packed: shown the moment a touch opens it, while it draws afresh
     touched = os.path.getmtime(TOUCH) if os.path.exists(TOUCH) else None
-    held, forced, badged = 0.0, None, False
+    held, forced, badged, swiped = 0.0, None, False, None
     try:
         while not (until and until()):
             if os.path.exists(RESCUE) and screen.visible():   # no Wi-Fi: say how to fix it, and nothing else
@@ -258,6 +258,7 @@ def main(screen, until=None):
                 try:
                     at = json.load(open(TOUCH))
                     forced = route(pages, index, int(at.get("x", 0)), int(at.get("y", 0)), time.time() < held, at.get("gesture"))
+                    swiped = f"slide-{at['gesture']}" if at.get("gesture") in ("next", "prev") else None   # its slide
                     held = time.time() + HOLD
                 except Exception as e:
                     print(f"touch: {e}", file=sys.stderr)
@@ -269,11 +270,19 @@ def main(screen, until=None):
                 touched_jump = False
             if jump is not None:   # the next page's turn, or the one the desktop asked for
                 moving = 0 <= index != jump and not touched_jump   # a new page gets a transition, unless a touch asked
+                theme, swiped = (swiped if touched_jump else None), None   # a swipe's page slides in, the way it went
                 index = jump
                 page = pages[index]
-                getattr(screen, "page", lambda name, instant: None)(page.name, touched_jump)   # a render server tells its Pi
-                if touched_jump and page.name in last and screen.visible():   # a Zero takes seconds to draw some pages
-                    mm[:] = last[page.name]; screen.flush()
+                # a render server tells its Pi, which may put up (or slide in) its own copy of the page at once
+                up = getattr(screen, "page", lambda name, instant, theme: False)(page.name, touched_jump, theme)
+                if touched_jump and not up and page.name in last and screen.visible():   # a Zero takes seconds to draw some pages
+                    if theme:
+                        screen.play(last[page.name], theme)
+                    else:
+                        mm[:] = last[page.name]; screen.flush()
+                    up = True
+                if theme and not up:   # nothing to show yet: slide once it's drawn
+                    moving = theme
                 try:
                     os.makedirs(os.path.dirname(SHOWING), exist_ok=True)
                     open(SHOWING, "w").write(page.name + "\n")
@@ -304,7 +313,7 @@ def main(screen, until=None):
                         if not isinstance(screen, remote.Server):   # a render server draws fast enough without it
                             last[page.name] = frame
                         if moving:
-                            screen.play(frame); moving = False
+                            screen.play(frame, moving if isinstance(moving, str) else None); moving = False
                         else:
                             mm[:] = frame
                         shown = key
@@ -379,7 +388,7 @@ def check():
     class Screen:   # always visible, and only memory: a few turns of the display loop itself, which nothing else runs
         mm = bytearray(kit.SCREEN[0] * kit.SCREEN[1] * 2)
         visible, flush, close = (lambda self: True), (lambda self: None), (lambda self: None)
-        def play(self, new): self.mm[:] = new
+        def play(self, new, theme=None): self.mm[:] = new
     turns = iter(range(4))
     main(Screen(), until=lambda: next(turns, None) is None)
     transitions.check()

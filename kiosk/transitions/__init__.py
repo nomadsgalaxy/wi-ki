@@ -66,12 +66,38 @@ off = turned_off()
 ORDER = itertools.cycle([t for t in THEMES if t not in off] or THEMES)   # all of them off means none are
 
 
+# a swipe's own transition, never in the rotation: the new page slides in from the side the finger moved towards, pushing
+# the old one out, so the screen follows the finger. slide-next is a swipe left (the new page comes in from the right)
+SLIDES, SLIDE = {"slide-next": 1, "slide-prev": -1}, 0.25   # and its seconds: quick, it's feedback
+
+
+def slide(mm, new, step, seconds=SLIDE, fps=30):
+    """the slide itself: whole rows, two copies a row a frame. Each frame goes as far as the time says, so it lands on
+    time on any Pi: a Zero manages about three frames in a quarter second (80 ms each), a Pi 4 all of them"""
+    from .canvas import WIDTH, STRIDE
+    old, start, cost = bytes(mm[:len(new)]), time.monotonic(), 0.0
+    # each frame shows where the slide should be when it's finished (the last one took cost), and none starts that
+    # would land after the end: the final copy (in play()) lands it
+    while (done := (time.monotonic() - start + cost) / seconds) < 1:
+        began = time.monotonic()
+        x = round((1 - (1 - done) ** 2) * WIDTH) * 2   # bytes the new page is in by then, slowing as it lands
+        for o in range(0, len(new), STRIDE):
+            if step > 0:   # in from the right
+                mm[o:o + STRIDE - x] = old[o + x:o + STRIDE]; mm[o + STRIDE - x:o + STRIDE] = new[o:o + x]
+            else:          # in from the left
+                mm[o:o + x] = new[o + STRIDE - x:o + STRIDE]; mm[o + x:o + STRIDE] = old[o:o + STRIDE - x]
+        cost = time.monotonic() - began
+        time.sleep(max(0, 1 / fps - cost))   # no faster than fps on a quick machine
+
+
 def play(mm, new, theme=None, fps=FPS, on_frame=None):
     """turn what's in mm (the framebuffer) into new, a page's whole frame in packed bytes. It always ends on the new
     page exactly: if a theme, on_frame or the pacing fails partway, the rest of the transition is skipped, the failure
     goes to stderr, and the screen still lands on the new page"""
     name = theme or next(ORDER)
     try:
+        if name in SLIDES:
+            return slide(mm, new, SLIDES[name])
         canvas = Canvas(mm, new)
         module = THEMES[name]
         steps = module.frames(canvas, round(getattr(module, "SECONDS", SECONDS) * FPS))
@@ -208,6 +234,21 @@ def check():
     for name, module in THEMES.items():   # and a theme's own self-test, if it has one, so --check runs it too
         if callable(getattr(module, "check", None)):
             module.check()
+    # a swipe's slide: the new page comes in from the side the finger moved towards, and it ends on the new page
+    from .canvas import WIDTH, STRIDE
+    old, new = bytes([1]) * (STRIDE * 4), bytes([2]) * (STRIDE * 4)
+    seen = []
+    class Watch(bytearray):
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            if isinstance(key, slice) and key.start == 0 and key.stop and key.stop > 2 and len(seen) < 99:
+                seen.append(bytes(self[:STRIDE]))
+    for name, edge in (("slide-next", -2), ("slide-prev", 0)):   # where the new page shows first: the right, the left
+        mm, seen[:] = Watch(old), []
+        play(mm, new, name, fps=None)
+        assert bytes(mm) == new, f"{name} ends on the new page"
+        mid = seen[len(seen) // 2]
+        assert mid[edge] == 2 and mid[-2 - edge] == 1, f"{name}: halfway, the new page is in on its side and the old on the other"
     print("transitions: ok")
 
 
