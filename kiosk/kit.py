@@ -2,7 +2,7 @@
 """kit: what every page of the kiosk shares. The screen, the colours, the VGA console font, RGB565 packing for the
 framebuffer, and the little pixel weather icons. A page imports what it needs from here and nothing from other pages.
 """
-import gzip, json, math, os, struct
+import gzip, json, math, os, struct, threading, time
 from datetime import datetime
 from PIL import Image, ImageChops, ImageDraw
 
@@ -243,3 +243,115 @@ def unpack(img):
     lo, hi = img.split()
     g = ImageChops.add(hi.point([(v & 7) << 5 for v in range(256)]), lo.point([(v >> 5) << 2 for v in range(256)]))
     return Image.merge("RGB", (hi.point([v >> 3 << 3 for v in range(256)]), g, lo.point([(v & 31) << 3 for v in range(256)])))
+
+
+# --- the easy way to make a page ---------------------------------------------------------------------------------------
+
+
+class Simple:
+    """a page you make by saying what it shows: kit does the rest (the packing, fetching in the background, redrawing
+    only when something changes, and staying up when something fails). catalog/new/page.py is one to start from:
+
+        class Page(kit.Simple):
+            name, seconds = "hello", 20
+            every = 600                        # optional: run fetch() this often (seconds), in the background
+            SAMPLE = {"title": "HELLO"}        # what fetch() returns, for check(), preview() and fuzz
+            def fetch(self): ...               # optional: get the data. It can be slow, and if it raises, the page
+                                               # keeps the data it had
+            def draw(self, img, now, data): ...   # draw on img, a screen-sized RGB picture cleared to BG
+            def moving(self, now, t, data): ...   # optional: [(RGB picture, (x, y))], every frame; keep them small
+
+    draw() runs again when the minute changes or new data comes in. A page that fetches says it's waiting until its
+    first fetch works. One that can't draw shows why, and so does the console. Options are __init__'s arguments, as
+    on any page; there's no need to call this __init__.
+    shortcut: each renderer fetches for itself, with no shared cache file like sports' has; add one if a page's
+    service minds being asked twice."""
+    seconds, every, SAMPLE = 20, 0, None
+    data, failed, _bg, _busy, _got, _new = None, None, (None, None), False, 0.0, 0
+
+    def fetch(self):
+        return None
+
+    def draw(self, img, now, data):
+        text(img, (40, 40), self.name.upper(), O, scale=4)
+
+    def moving(self, now, t, data):
+        return []
+
+    def _fetch(self):
+        try:
+            self.data, self._new, self._got = self.fetch(), self._new + 1, time.time()
+        except Exception as e:
+            print(f"{self.name}: can't fetch: {type(e).__name__}: {e}", flush=True)
+            self._got = time.time() - max(0, self.every - 60)   # try again in a minute
+        finally:
+            self._busy = False
+
+    def picture(self, now, data, safe=True):
+        """the page with data, as an RGB picture. safe: if draw() fails, the picture says why instead of raising"""
+        img = Image.new("RGB", SCREEN, BG)
+        if data is None and self.every:
+            text(img, (40, 40), "WAITING FOR DATA…", G, scale=3)
+            return img
+        try:
+            self.failed = None
+            self.draw(img, now, data)
+        except Exception as e:
+            if not safe:
+                raise
+            self.failed = f"{type(e).__name__}: {e}"
+            print(f"{self.name}: can't draw: {self.failed}", flush=True)
+            img = Image.new("RGB", SCREEN, BG)
+            text(img, (40, 40), "CAN'T DRAW", ERROR, scale=3)
+            text(img, (40, 100), self.failed[:SCREEN[0] // 16 - 5], G)
+        return img
+
+    def start(self, now):
+        pass
+
+    def background(self, now):
+        if self.every and not self._busy and time.time() - self._got >= self.every:
+            self._busy = True
+            threading.Thread(target=self._fetch, daemon=True).start()
+        key = (now.replace(second=0, microsecond=0), self._new)
+        if key != self._bg[0]:
+            self._bg = (key, packed(self.picture(now, self.data)))
+        return self._bg
+
+    def regions(self, now, t):
+        try:
+            return [(packed(img.convert("RGB")), xy) for img, xy in self.moving(now, t, self.data) or []]
+        except Exception as e:   # what moves just stops; the page stays
+            self.failed = f"{type(e).__name__}: {e}"
+            return []
+
+    @classmethod
+    def check(cls, tries=20):
+        """the self-test every Simple page gets: draws SAMPLE, the waiting screen if it fetches, and SAMPLE broken
+        tries ways (fuzz.py), and checks what moves stays on the screen"""
+        import copy, random, fuzz
+        now = datetime(2026, 10, 19, 9, 41)
+        for n in range(tries + 1):
+            page = cls()
+            page.every = 0   # never fetches in a test
+            page.data = cls.SAMPLE if n == 0 else fuzz.mangle(copy.deepcopy(cls.SAMPLE), random.Random(19000 + n))
+            try:
+                assert page.picture(now, page.data, safe=False).size == SCREEN
+                for t in (0, .5, 3, 30):
+                    for img, (x, y) in page.moving(now, t, page.data) or []:
+                        assert 0 <= x and 0 <= y and x + img.width <= SCREEN[0] and y + img.height <= SCREEN[1], \
+                            f"something moving at ({x}, {y}), {img.width}x{img.height}, goes off the screen"
+            except Exception as e:
+                raise AssertionError(f"{cls.name}: with " + ("SAMPLE" if n == 0 else f"SAMPLE broken (try {n})")
+                                     + f": {type(e).__name__}: {e}. data: {page.data!r:.300}") from e
+        if cls.every:
+            assert cls().picture(now, None, safe=False).size == SCREEN
+
+    @classmethod
+    def preview(cls, now=None):
+        """the page with SAMPLE, and what moves where it is when the page comes up"""
+        now, page = now or datetime(2026, 10, 19, 9, 41), cls()
+        img = page.picture(now, cls.SAMPLE, safe=False)
+        for part, xy in page.moving(now, 0, cls.SAMPLE) or []:
+            img.paste(part.convert("RGB"), xy)
+        return img
