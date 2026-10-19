@@ -4,7 +4,7 @@
  "home": "public",
  "about": "the blocks around a place: 311 reports, permits and bike-share stations (Hive76 and Philadelphia's open data by default, a few other cities ready to pick, or any city's Open311 and GBFS feeds)",
  "found": {
-  "main": "d5c255"
+  "main": "5ce517"
  },
  "shapes": [
   "bar"
@@ -14,6 +14,12 @@
   "touch": false,
   "services": [
    "gbfs.bcycle.com",
+   "gbfs.bluebikes.com",
+   "gbfs.capitalbikeshare.com",
+   "gbfs.citibikenyc.com",
+   "gbfs.divvybikes.com",
+   "gbfs.lyft.com",
+   "mobile311.sfgov.org",
    "overpass-api.de",
    "overpass.private.coffee",
    "phl.carto.com"
