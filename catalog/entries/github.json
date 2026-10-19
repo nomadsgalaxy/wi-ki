@@ -4,7 +4,7 @@
  "home": "public",
  "about": "open PRs, issues and recent pushes for you and your orgs (or the owners you name). Needs the desk feed (feed/deskfeed.py) on the desktop whose GitHub it shows: feed/README.md has the steps.",
  "found": {
-  "main": "bbec1f"
+  "main": "cc4611"
  },
  "shapes": [
   "bar"
