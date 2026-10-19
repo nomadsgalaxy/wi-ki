@@ -42,7 +42,7 @@ from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves our own folder off the path
-import kit, remote, transitions, web  # noqa: E402
+import kit, remote, touchpanel, transitions, web  # noqa: E402
 from pages import setup as setup_page  # noqa: E402
 
 FPS = 4
@@ -50,7 +50,8 @@ FPS = 4
 _suffix = "" if kit.SHAPE == "bar" else f"-{kit.SHAPE}"
 CONTROL = os.path.expanduser(f"~/.cache/kiosk/control{_suffix}.json")
 SHOWING = os.path.expanduser(f"~/.cache/kiosk/showing{_suffix}")
-# a touch, {"x": .., "y": ..} in screen pixels: whatever reads the touch panel writes it (or kiosk-ctl touch, to try one)
+# a touch, {"x": .., "y": ..} in screen pixels, or a gesture, {"gesture": "menu" | "next" | "prev"} (a two-finger double
+# tap, a swipe left, a swipe right): whatever reads the touch panel writes it (or kiosk-ctl touch, to try one)
 TOUCH = os.path.expanduser(f"~/.cache/kiosk/touch{_suffix}.json")
 # On a screen someone's touching, the rotation holds still for HOLD seconds after each touch, and a home button sits in
 # the corner (HOME_BUTTON, x0, y0, x1, y1) of every page but the home page itself.
@@ -58,6 +59,7 @@ HOLD = 60
 RESCUE = "/run/kiosk-rescue.json"   # rescue.py's hotspot, while the kiosk has lost its Wi-Fi: shown instead of the pages
 HOME_BUTTON = (0, kit.SCREEN[1] - 72, 72, kit.SCREEN[1])
 KDSETMODE, KD_TEXT, KD_GRAPHICS = 0x4B3A, 0, 1
+WAKE = threading.Event()   # set by the touch panel's reader, so a touch doesn't wait for the next frame
 
 
 # a kiosk can have its own playlist (its location, say) outside ~/kiosk, which updates replace whole
@@ -113,19 +115,21 @@ def blit(mm, img, xy):
         mm[o:o + w] = data[row * w:(row + 1) * w]
 
 
-def route(pages, index, x, y, holding):
-    """where a touch goes -> the index of the page to show now, or None to stay. With a home page in the playlist: a touch
-    on a rotating page goes home; on the home page, it opens the page whose tile it hit; on a page someone opened, it
-    goes to the page if it takes touches, unless it's on the home button, and home if not. Without one, the page up
-    gets it, as it would anyway."""
+def route(pages, index, x, y, holding, gesture=None):
+    """where a touch goes -> the index of the page to show now, or None to stay. A gesture: "menu" goes to the home page
+    (if the playlist has one), "next" and "prev" to the next or last page in the rotation. A tap on the home button,
+    which shows while the screen holds still, goes home; anywhere else, the page up gets it if it takes touches (the
+    home page's tiles open their pages). A tap on a page that doesn't take touches only holds the rotation still, which
+    brings up the home button."""
     names = [p.name for p in pages]
     home = names.index("home") if "home" in names else None
+    if gesture in ("next", "prev"):
+        return following(pages, index, 1 if gesture == "next" else -1)
+    if gesture == "menu" or gesture is None and holding and HOME_BUTTON[0] <= x < HOME_BUTTON[2] and HOME_BUTTON[1] <= y < HOME_BUTTON[3]:
+        return home if home != index else None
     page = pages[index]
-    on_button = HOME_BUTTON[0] <= x < HOME_BUTTON[2] and HOME_BUTTON[1] <= y < HOME_BUTTON[3]
-    if home is None or index == home or holding and hasattr(page, "touch") and not on_button:
-        go = page.touch(x, y) if hasattr(page, "touch") else None
-        return names.index(go) if go in names and names.index(go) != index else None
-    return home
+    go = page.touch(x, y) if gesture is None and hasattr(page, "touch") else None
+    return names.index(go) if go in names and names.index(go) != index else None
 
 
 def rescue_screen(info):
@@ -155,16 +159,16 @@ def badge():
 BADGE = badge()
 
 
-def following(pages, index):
-    """the next page in the rotation that wants to be shown (the next one, if none do)"""
+def following(pages, index, step=1):
+    """the next page in the rotation that wants to be shown (the next one, if none do); step -1 for the one before"""
     for k in range(1, len(pages) + 1):
-        j = (index + k) % len(pages)
+        j = (index + k * step) % len(pages)
         try:
             if getattr(pages[j], "active", lambda: True)():
                 return j
         except Exception:
             pass   # a page that can't say is skipped this time round
-    return (index + 1) % len(pages)
+    return (index + step) % len(pages)
 
 
 def steer(pages, index, since, last, path=CONTROL):
@@ -216,12 +220,19 @@ def main(screen, until=None):
     pages = playlist()
     if not pages:
         sys.exit("playlist.json has no pages that load")
+    # a touch screen here, or a Pi's that sends its touches to this render server: the menu a gesture opens
+    if (touchpanel.find() or isinstance(screen, remote.Server)) and not any(p.name == "home" for p in pages):
+        try:
+            pages.append(importlib.import_module("pages.home").Page())
+        except Exception as e:
+            print(f"playlist: no home page for the touch screen: {e}", file=sys.stderr)
     for p in pages:
         if hasattr(p, "pages"):   # the home page: it shows the others
             p.pages = pages
     pages = pages + [setup_page.Page()]   # its fingerprint reminder, in the rotation only when active() says so
     steering, mm = ("start", None, None), screen.mm
     index, since, shown, drawn, moving = -1, 0.0, None, {}, False
+    last = {}   # each page's last whole frame, packed: shown the moment a touch opens it, while it draws afresh
     touched = os.path.getmtime(TOUCH) if os.path.exists(TOUCH) else None
     held, forced, badged = 0.0, None, False
     try:
@@ -246,7 +257,7 @@ def main(screen, until=None):
                 touched = mtime
                 try:
                     at = json.load(open(TOUCH))
-                    forced = route(pages, index, int(at["x"]), int(at["y"]), time.time() < held)
+                    forced = route(pages, index, int(at.get("x", 0)), int(at.get("y", 0)), time.time() < held, at.get("gesture"))
                     held = time.time() + HOLD
                 except Exception as e:
                     print(f"touch: {e}", file=sys.stderr)
@@ -260,6 +271,8 @@ def main(screen, until=None):
                 moving = 0 <= index != jump and not touched_jump   # a new page gets a transition, unless a touch asked
                 index = jump
                 page = pages[index]
+                if touched_jump and page.name in last and screen.visible():   # a Zero takes seconds to draw some pages
+                    mm[:] = last[page.name]; screen.flush()
                 try:
                     os.makedirs(os.path.dirname(SHOWING), exist_ok=True)
                     open(SHOWING, "w").write(page.name + "\n")
@@ -286,10 +299,13 @@ def main(screen, until=None):
                         full = bg.copy()   # finished frame: writing the background alone blanks them for a moment
                         for img, xy in regions:
                             full.paste(rows(img) if isinstance(img, bytes) else img, xy)
+                        frame = full.tobytes()
+                        if not isinstance(screen, remote.Server):   # a render server draws fast enough without it
+                            last[page.name] = frame
                         if moving:
-                            screen.play(full.tobytes()); moving = False
+                            screen.play(frame); moving = False
                         else:
-                            mm[:] = full.tobytes()
+                            mm[:] = frame
                         shown = key
                         drawn = {xy: img for img, xy in regions}
                     else:
@@ -303,7 +319,8 @@ def main(screen, until=None):
                     mm[:] = kit.rgb565(img); shown = None
                 screen.flush()
             fps = getattr(page, "fps", FPS)
-            time.sleep(max(0.02, 1 / fps - time.time() % (1 / fps)))   # on the beat (the quarter second, mostly)
+            WAKE.wait(max(0.02, 1 / fps - time.time() % (1 / fps)))   # on the beat (the quarter second, mostly)
+            WAKE.clear()
     finally:
         getattr(screen, "close", lambda: None)()
 
@@ -328,10 +345,11 @@ def display():
     again (we knock every minute), exit, so tty1's loop brings us back to connect to it."""
     where = remote.config()
     screen = Framebuffer()
+    touchpanel.start(TOUCH, kit.SCREEN, WAKE.set)   # does nothing until a touch screen turns up
     try:
         if where:
             try:
-                remote.client(where, screen.mm, stop=setup_page.urgent)   # the Setup page is only ever drawn here
+                remote.client(where, screen.mm, stop=setup_page.urgent, touch=TOUCH)   # the Setup page is only ever drawn here
             except Exception as e:   # unreachable, hung up, or garbled: draw it ourselves
                 print(f"remote: {e}; drawing locally for now", file=sys.stderr)
         ready = back(where) if where else None
@@ -350,6 +368,7 @@ def check():
         print(f"{name}: ok")
     importlib.import_module("eventsync").check()
     importlib.import_module("control").check()
+    touchpanel.check()
     for name in ("config", "link", "packs", "admin", "setup_check"):   # the setup page and the rules it has to keep
         importlib.import_module(name).check()
     gone = os.path.join(HERE, "no-setup.json")   # the Setup page as main() and run() reach it, through the package
@@ -388,13 +407,19 @@ def check_touch():
                 self.touch = lambda x, y: self.got.append((x, y)) or go
     rotating, map_, home = P("weather"), P("around", touchy=True), P("home", touchy=True, go="around")
     pages = [rotating, map_, home]
-    assert route(pages, 0, 500, 200, False) == 2, "a touch on a page going round goes home"
+    home.active = lambda: False   # as the real one: never in the rotation
+    corner = (10, kit.SCREEN[1] - 10)
+    assert route(pages, 0, 500, 200, False) is None, "a tap on a page that doesn't take touches only holds it still"
+    assert route(pages, 0, *corner, False) is None, "the home button isn't there until the screen holds still"
+    assert route(pages, 0, *corner, True) == 2, "and then it goes home"
     assert route(pages, 2, 500, 200, True) == 1, "the home page's tile opens its page"
-    assert route(pages, 1, 500, 200, True) is None and map_.got == [(500, 200)], "an opened page that takes touches gets them"
-    assert route(pages, 1, 10, kit.SCREEN[1] - 10, True) == 2, "except on the home button"
-    assert route(pages, 0, 500, 200, True) == 2, "a page that doesn't take touches goes home"
+    assert route(pages, 1, 500, 200, False) is None and map_.got == [(500, 200)], "a page that takes touches gets them"
+    assert route(pages, 1, 500, 200, False, "menu") == 2 and route(pages, 2, 0, 0, True, "menu") is None, "menu: home"
+    assert route(pages, 0, 0, 0, False, "next") == 1 and route(pages, 1, 0, 0, False, "next") == 0, "next skips home"
+    assert route(pages, 0, 0, 0, False, "prev") == 1 and route(pages, 2, 0, 0, True, "prev") == 1, "and so does prev"
+    assert len(map_.got) == 1, "a gesture isn't a tap on the page"
     assert route([rotating, map_], 1, 500, 200, False) is None and map_.got[-1] == (500, 200), "no home page: as before"
-    assert route([rotating], 0, 500, 200, False) is None
+    assert route([rotating], 0, 500, 200, False, "menu") is None
     assert BADGE.size == (64, 64)
     print("touch: ok")
 
@@ -457,7 +482,7 @@ if __name__ == "__main__":
     elif sys.argv[1:] == ["--front"]:
         web.front(int(os.environ.get("KIOSK_PORT", 80)))
     elif sys.argv[1:] == ["--serve"]:
-        main(remote.Server((remote.config() or ("", 7676))[1]))
+        main(remote.Server((remote.config() or ("", 7676))[1], TOUCH, WAKE.set))
     elif len(sys.argv) == 1:
         display()
     else:
