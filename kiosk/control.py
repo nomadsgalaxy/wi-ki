@@ -7,6 +7,7 @@
   auto            back to the normal rotation
   next            on to the next page, and back to the rotation
   touch <x> <y>   a touch on the screen at x, y (for trying a touchable page without a touch screen)
+  touch <gesture> menu, next or prev: a two-finger double tap, a swipe left, a swipe right
 
 It writes ~/.cache/kiosk/control.json, which kiosk.py watches: {"page": <pinned page or null>, "skip": <changes on
 every next>}. kiosk.py writes the page it's showing to ~/.cache/kiosk/showing. This deliberately imports nothing
@@ -48,13 +49,14 @@ def run(args, cache=CACHE, playlist=PLAYLIST):
         state["page"] = None
     elif args == ["next"]:
         state["page"], state["skip"] = None, time.time()
-    elif len(args) == 3 and args[0] == "touch" and all(a.isdigit() for a in args[1:]):
+    elif args[:1] == ["touch"] and (len(args) == 3 and all(a.isdigit() for a in args[1:]) or args[1:] in (["menu"], ["next"], ["prev"])):
         os.makedirs(cache, exist_ok=True)
         touch = os.path.join(cache, "touch.json")
-        json.dump({"x": int(args[1]), "y": int(args[2])}, open(touch + ".tmp", "w")); os.replace(touch + ".tmp", touch)
+        at = {"x": int(args[1]), "y": int(args[2])} if len(args) == 3 else {"gesture": args[1]}
+        json.dump(at, open(touch + ".tmp", "w")); os.replace(touch + ".tmp", touch)
         return "ok"
     else:
-        raise ValueError(f"usage: status | show <{'|'.join(names)}> | auto | next | touch <x> <y>")
+        raise ValueError(f"usage: status | show <{'|'.join(names)}> | auto | next | touch <x> <y> | touch menu|next|prev")
     os.makedirs(cache, exist_ok=True)
     json.dump(state, open(control + ".tmp", "w")); os.replace(control + ".tmp", control)
     return "ok"
@@ -66,6 +68,7 @@ def check():
     json.dump([{"page": "weather"}, {"page": "github", "seconds": 20}, {"page": "radar", "on": False}], open(playlist, "w"))
     assert pages(playlist) == ["weather", "github"], "a page switched off isn't offered"
     assert run(["touch", "120", "480"], cache, playlist) == "ok" and json.load(open(os.path.join(cache, "touch.json"))) == {"x": 120, "y": 480}
+    assert run(["touch", "prev"], cache, playlist) == "ok" and json.load(open(os.path.join(cache, "touch.json"))) == {"gesture": "prev"}
     status = lambda: json.loads(run(["status"], cache, playlist))
     assert status() == {"pages": ["weather", "github"], "showing": None, "pinned": None}
     open(os.path.join(cache, "showing"), "w").write("weather\n")

@@ -13,6 +13,8 @@ Every message is a 12-byte header (kind, a, payload length) and its payload:
   RECT  a = the first row; the payload is x and width (two shorts), then the rectangle's rows, compressed
   TRAN  a = the length of the transition's name; the payload is the name, then the whole frame, compressed
   PING  nothing
+and one the Pi sends the other way:
+  TUCH  a touch on the Pi's screen, as JSON (see kiosk.py's TOUCH): the server hands it to the page it's drawing
 
 REMOTE (~/.config/kiosk/remote.json) says where the server is: {"server": "<address>", "port": 7676}. Without it, or
 when it can't be reached, the Pi draws the pages itself.
@@ -68,8 +70,9 @@ def bands(old, new):
 class Server:
     """the screen kiosk.py draws on when it serves: memory, with whatever changed sent on to the Pi after each frame"""
 
-    def __init__(self, port):
+    def __init__(self, port, touch=None, poke=lambda: None):
         self.mm, self.sent, self.conn, self.quiet, self.pinged = bytearray(SIZE), None, None, 0.0, 0.0
+        self.touch, self.poke = touch, poke   # where the Pi's touches go (kiosk.py's TOUCH), and what wakes the display
         self.listener = socket.create_server(("", port), reuse_port=False)
         threading.Thread(target=self.accept, daemon=True).start()
 
@@ -94,6 +97,22 @@ class Server:
             if self.conn:
                 self.conn.close()
             self.sent, self.conn = None, conn   # a new connection gets the whole screen
+            threading.Thread(target=self.touches, args=(conn,), daemon=True).start()
+
+    def touches(self, conn):
+        """what the Pi sends: its touches, into the touch file, until the connection goes"""
+        try:
+            while True:
+                kind, _, n = HEADER.unpack(read(conn, HEADER.size))
+                if n > 1024:
+                    raise ConnectionError("not a touch")
+                at = json.loads(read(conn, n))
+                if kind == b"TUCH" and self.touch and isinstance(at, dict):
+                    os.makedirs(os.path.dirname(self.touch), exist_ok=True)
+                    json.dump(at, open(self.touch + ".tmp", "w")); os.replace(self.touch + ".tmp", self.touch)
+                    self.poke()
+        except (OSError, ValueError, ConnectionError, struct.error):
+            pass   # it hung up, or sent nonsense: the screen's side finds out on its next send
 
     def send(self, kind, a, payload=b""):
         try:
@@ -114,6 +133,8 @@ class Server:
             name = next(transitions.ORDER)
             if self.send(b"TRAN", len(name), name.encode() + zlib.compress(new, 1)):
                 self.sent = bytes(new)
+                # the theme's own length if it's loaded here; if not (a server doesn't load them), the usual one: a
+                # longer theme's frames just wait on the Pi, which reads the next message once the transition's done
                 module = transitions.THEMES[name]
                 self.quiet = time.time() + getattr(module, "SECONDS", transitions.SECONDS) + 0.5
 
@@ -151,11 +172,30 @@ def read(sock, n):
     return bytes(data)
 
 
-def client(address, mm, play=transitions.play, stop=None):
+def forward(sock, touch, every=0.05):
+    """the Pi's touches (its touch file, written by touchpanel.py) up the link to the server, until it closes"""
+    seen = os.path.getmtime(touch) if os.path.exists(touch) else None
+    while True:
+        time.sleep(every)
+        try:
+            mtime = os.path.getmtime(touch)
+            if mtime != seen:
+                seen, body = mtime, open(touch, "rb").read()
+                sock.sendall(HEADER.pack(b"TUCH", 0, len(body)) + body)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return
+
+
+def client(address, mm, play=transitions.play, stop=None, touch=None):
     """the Pi's side: put what the server sends on the screen, until the link drops (then it raises) or stop() says
-    the Pi has something of its own to show. The server pings every few seconds, so that's checked often enough."""
+    the Pi has something of its own to show. The server pings every few seconds, so that's checked often enough.
+    touch: the Pi's touch file, whose touches go up to the server."""
     sock = socket.create_connection(address, timeout=5)
     sock.settimeout(TIMEOUT)
+    if touch:
+        threading.Thread(target=forward, args=(sock, touch), daemon=True).start()
     print(f"remote: showing {address[0]}:{address[1]}", flush=True)
     while True:
         kind, a, n = HEADER.unpack(read(sock, HEADER.size))
@@ -219,5 +259,27 @@ def check():
     assert server.conn is pi_conn, "the Pi still has its screen"
     done.set(); server.mm[0:2] = b"\x0a\x0a"; server.flush(); pi.join(5)
     assert not pi.is_alive(), "stop() hands the screen back to the Pi at the next message"
+    server.listener.close()
+    # a touch on the Pi reaches the server's touch file, and wakes its display
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    pokes, theirs, ours = [], os.path.join(tmp, "server-touch.json"), os.path.join(tmp, "pi-touch.json")
+    server = Server(0, theirs, lambda: pokes.append(1)); port = server.listener.getsockname()[1]
+    mm, done = bytearray(SIZE), threading.Event()
+    pi = threading.Thread(target=lambda: client(("127.0.0.1", port), mm, fake_play, done.is_set, ours), daemon=True)
+    pi.start()
+    for _ in range(100):
+        if server.conn:
+            break
+        time.sleep(0.02)
+    server.mm[0:2] = b"\x0b\x0b"; server.flush()
+    time.sleep(0.2)
+    json.dump({"gesture": "next"}, open(ours, "w"))
+    for _ in range(100):
+        if os.path.exists(theirs):
+            break
+        time.sleep(0.02)
+    assert mm[0:2] == b"\x0b\x0b" and json.load(open(theirs)) == {"gesture": "next"} and pokes, "frames come down, and touches go up"
+    done.set(); server.mm[0:2] = b"\x0c\x0c"; server.flush(); pi.join(5)
     server.listener.close()
     print("remote: ok")
