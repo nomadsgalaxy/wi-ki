@@ -10,8 +10,9 @@ The kiosk's `github` and `agents` pages show things only my desktop can see: pri
 Claude and Codex quotas. `deskfeed.py` gathers them every 5 minutes and pushes them to the Pi as
 `~/.cache/kiosk/desk.json`. The pages read that file through `kit.Feed`.
 
-It needs `gh` (logged in), `herdr` and `kodexbar-quotas` (KodexBar Suite) on the desktop. Each one is its own
-section, so if one breaks the others still go out, and the page shows that section's error.
+It uses whichever of `gh` (logged in), `herdr` and `kodexbar-quotas` (KodexBar Suite) the desktop has. Each one is its
+own section: a tool that isn't installed sends nothing, and its page leaves that part out (without KodexBar, the
+agents page is all herdr). One that breaks still lets the others go out, and the page shows that section's error.
 
 ```
 feed/deskfeed.py            # print the feed
