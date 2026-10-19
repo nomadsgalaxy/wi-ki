@@ -27,7 +27,7 @@ import json, math, os, threading, time, urllib.parse, urllib.request, zlib
 from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, A, text, clock, packed, local, freshness
+from kit import SCREEN, MAPS, A, text, clock, packed, local, freshness
 
 ORANGE, WHITE, GREY, DARK, BLUE, LIGHT = (246, 145, 31), (235, 235, 235), (170, 170, 170), (85, 85, 85), (60, 120, 255), (120, 200, 255)
 BG, RULE, PANEL = (12, 14, 20), (40, 44, 56), (22, 25, 34)
@@ -39,7 +39,7 @@ OVERPASS = ("https://overpass-api.de/api/interpreter", "https://overpass.private
 CACHE = os.path.expanduser("~/.cache/kiosk/around-{lat}_{lon}_{radius}{src}.json")   # 311 and permits, for one middle,
 BIKES = os.path.expanduser("~/.cache/kiosk/around-bikes-{lat}_{lon}{src}.json")      # radius and source; the bikes too
 PHL = "phl-carto"   # the City of Philadelphia's own data, for reports and permits
-STREETS = os.path.expanduser("~/.cache/kiosk/around-streets-{lat}_{lon}.json")
+STREETS = os.path.join(MAPS, "around-streets-{lat}_{lon}.json")
 EVERY, BIKES_EVERY, IDLE = 900, 60, 30   # seconds: city data, bikes, and how long a touched view stays before going back
 RETRY = 600                               # seconds before a fetch that failed is tried again (a success waits its EVERY)
 STALE_CITY, STALE_BIKES = 3600, 600       # seconds: older than this and the corner says so
@@ -156,7 +156,8 @@ def fetch_streets(lat, lon, half_w, half_h):
     data = {"roads": [[e["tags"]["highway"] in major, pts(e)] for e in got if "highway" in e.get("tags", {})],
             "rail": [pts(e) for e in got if "railway" in e.get("tags", {})]}
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    json.dump(data, open(path + ".tmp", "w")); os.replace(path + ".tmp", path)
+    tmp = f"{path}.{os.getpid()}.tmp"   # its own: kiosks sharing MAPS may fetch the same map at once
+    json.dump(data, open(tmp, "w")); os.replace(tmp, path)
     return data
 
 
