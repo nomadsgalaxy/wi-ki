@@ -1018,7 +1018,7 @@ def pages_page(csrf, note="", opened=None, typed=None, wrong=None):
                    f'<label>seconds <input name=seconds inputmode=numeric value="{html.escape(str(e.get("seconds", "")))}" '
                    f'placeholder=own></label><button>save time</button></form>')
         meta = known.get(e["page"], {})
-        settings = f'<a class=btn href="/pages?set={i}#p{i}">set</a>' if has_settings(meta) and opened != i else ""
+        settings = f'<a class=btn href="/pages?set={i}#p{i}">config</a>' if has_settings(meta) and opened != i else ""
         controls = "" if ro else (settings + button(csrf, "off" if on else "on", "turn off" if on else "turn on", i) +
                                   button(csrf, "up", "↑ up", i) + button(csrf, "down", "↓ down", i) + seconds +
                                   button(csrf, "remove", "remove", i, danger=True))   # last, apart from the rest
