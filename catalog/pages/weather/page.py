@@ -167,6 +167,67 @@ def download(url):
         return json.load(r)
 
 
+def clean(w):
+    """a forecast the page can draw, made from whatever it was given, or None if there's no usable now or day. Numbers
+    are coerced and held to what the earth can do, a field that's missing or the wrong type takes a plain default,
+    hours and days that can't be drawn are dropped, and lists that don't line up are cut to the length that does.
+    Valid data comes out the same, so every drawing function below can trust what it's handed"""
+    def num(v, lo, hi, default=None):
+        v = v if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+        return default if v is None or not math.isfinite(v) else max(lo, min(hi, v))
+
+    def stamp(v):
+        try:
+            return v if datetime.strptime(v, "%Y-%m-%dT%H:%M") else None
+        except (TypeError, ValueError):
+            return None
+
+    def day(v):
+        try:
+            return v if date.fromisoformat(v) else None
+        except (TypeError, ValueError):
+            return None
+
+    def column(section, key):
+        got = section.get(key) if isinstance(section, dict) else None
+        return got if isinstance(got, list) else []
+
+    def code(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 99 else 0
+
+    if not isinstance(w, dict) or not isinstance(w.get("current"), dict):
+        return None
+    c, h, d = w["current"], w.get("hourly"), w.get("daily")
+    try:
+        t = num(c.get("temperature_2m"), -90, 60)
+        if t is None:
+            return None
+        now = {"temperature_2m": t, "apparent_temperature": num(c.get("apparent_temperature"), -90, 60, t),
+               "relative_humidity_2m": num(c.get("relative_humidity_2m"), 0, 100, 50),
+               "wind_speed_10m": num(c.get("wind_speed_10m"), 0, 300),   # no reading stays None
+               "wind_direction_10m": num(c.get("wind_direction_10m"), 0, 360, 0), "weather_code": code(c.get("weather_code")),
+               "is_day": c["is_day"] if c.get("is_day") in (0, 1) and not isinstance(c.get("is_day"), bool) else 1}
+        hours = [(a, num(b, -90, 60), num(p, 0, 100, 0)) for a, b, p in
+                 zip(map(stamp, column(h, "time")), column(h, "temperature_2m"), column(h, "precipitation_probability"))]
+        hours = [x for x in hours if x[0] and x[1] is not None][:48]
+        days = zip(map(day, column(d, "time")), map(code, column(d, "weather_code")),
+                   (num(v, -90, 60) for v in column(d, "temperature_2m_max")), (num(v, -90, 60) for v in column(d, "temperature_2m_min")),
+                   (num(v, 0, 100) for v in column(d, "precipitation_probability_max")),
+                   map(stamp, column(d, "sunrise")), map(stamp, column(d, "sunset")))
+        days = [x for x in days if None not in (x[0], x[2], x[3], x[5], x[6])][:14]   # a missing chance of rain is fine
+    except OverflowError:   # a number with a thousand digits, which isfinite() can't take
+        return None
+    if not days:
+        return None
+    out = {"current": now, "hourly": dict(zip(("time", "temperature_2m", "precipitation_probability"), map(list, zip(*hours)))) if hours
+           else {"time": [], "temperature_2m": [], "precipitation_probability": []},
+           "daily": dict(zip(("time", "weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max",
+                              "sunrise", "sunset"), map(list, zip(*days))))}
+    if isinstance(w.get("timezone"), str):
+        out["timezone"] = w["timezone"]
+    return out
+
+
 def valid(w):
     """w if it's a forecast this page can draw (every section, lists that line up, finite numbers, times that read),
     else None. Checked before it replaces the cache and when the cache is read, so an answer like {"error": true}
@@ -239,8 +300,9 @@ class Page:
         self.lon = lon if lon is not None else land["lon"] if land else -75.17
         self.place = place or (land["place"].upper() if land else "PHILADELPHIA")
         self.credit = f"scene: {land['credit']['author']}, {land['credit']['licence']}"[:40] if land else None
-        self.w, self.fixed = w, w is not None    # given a forecast (the self-test), it never fetches
-        self.mtime, self.last_try = (1 if w else 0), 0
+        self.fixed = w is not None    # given a forecast (the self-test), it never fetches
+        self.w = clean(w)             # one it can't draw is no forecast yet: the page waits
+        self.mtime, self.last_try = (1 if self.w else 0), 0
         self.loop, self.loop_key, self.moment, self.bg = {}, None, None, (None, None)
         self.fetching = None   # the thread fetching a new forecast, if one is
 
@@ -417,6 +479,18 @@ def check():
     assert frame(gaps, now, 0, 0.0).size == SCREEN, "an hour with no temperature is left out"
     gaps["hourly"]["temperature_2m"] = [None] * len(gaps["hourly"]["time"])
     assert frame(gaps, now, 0, 0.0).size == SCREEN, "no hourly temperatures at all: the strip says so"
+    # odd data: what can be drawn is, what can't is no forecast yet
+    assert frame(clean(SAMPLE), now, 0, 0.0).tobytes() == frame(SAMPLE, now, 0, 0.0).tobytes(), "a good forecast is drawn as it is"
+    odd = json.loads(json.dumps(SAMPLE)); odd["hourly"]["temperature_2m"] = odd["hourly"]["temperature_2m"][:5]
+    odd["daily"]["sunset"] = odd["daily"]["sunset"][:3]; odd["current"]["relative_humidity_2m"] = "12"; del odd["current"]["wind_direction_10m"]
+    odd["daily"]["temperature_2m_max"][1] = 10 ** 9
+    got = clean(odd)
+    assert len(got["hourly"]["time"]) == 5 and len(got["daily"]["time"]) == 3, "lists that don't line up are cut to what does"
+    assert got["daily"]["temperature_2m_max"][1] == 60 and got["current"]["relative_humidity_2m"] == 50, "clamped, and defaulted"
+    odd_page = Page(odd); odd_page.start(now)
+    assert odd_page.w == got and odd_page.regions(now, 0.0), "and drawn"
+    assert all(clean(x) is None for x in (None, "x", {}, {"current": {}}, {**SAMPLE, "daily": {}}, {**SAMPLE, "current": {"temperature_2m": "16"}}))
+    assert Page({}).w is None and Page({}).regions(now, 0.0) == [], "no usable forecast: the page waits"
     assert "timezone=auto" in URL and "New_York" not in URL, "the forecast's hours are the location's own"
     global CACHE, fetch, download
     import tempfile

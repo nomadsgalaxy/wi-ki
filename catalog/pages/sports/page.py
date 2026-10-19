@@ -29,8 +29,6 @@ API_HOSTS = ("site.api.espn.com",)
 LOGO_MAX = 1 << 20   # bytes; a team logo is a few KB
 LOGO_PIXELS = 1024 * 1024   # decoded size; a 500 x 500 logo is a quarter of it, a tiny PNG can claim 50000 x 50000
 LOGO_SIDE = 1024   # and each side, so 2048 x 512 (the same total) doesn't pass
-TEAM_KEYS = {"label", "id", "color", "alt", "logo", "record", "next", "last"}
-GAME_KEYS = {"when", "state", "detail", "home", "them", "them_logo", "us_score", "them_score", "won", "tv"}
 INK, WHITE, SOFT, LIVE = (8, 9, 12), (240, 240, 240), (190, 192, 200), (255, 64, 64)
 COL = SCREEN[0] // len(TEAMS)
 UA = {"User-Agent": "wi-ki sports (github.com/nomadsgalaxy/wi-ki)"}
@@ -152,23 +150,43 @@ def aware(iso):
     return True
 
 
-def valid(data):
-    """whether a cache file has the shape draw() reads; a stale or damaged one is ignored"""
+def clean(data):
+    """the data in a shape draw() can take, or None if there's none to show (not a dict, no usable fetched time, no teams).
+    Text is made text and cut to what fits its place, scores are held to 0-999, a game that can't be placed in time is
+    dropped, and a field that's missing or the wrong type takes a plain default. Good data comes out as it went in"""
+    def text_of(v, n, default=""):
+        return v[:n] if isinstance(v, str) else default
+
+    def text_or_none(v, n):
+        return v[:n] if isinstance(v, str) else None
+
+    def points(v):
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf"):
+            return str(max(0, min(999, int(v))))
+        return text_or_none(v, 4)
+
+    def game_of(g):
+        if not isinstance(g, dict):
+            return None
+        try:
+            aware(g["when"])
+        except (KeyError, ValueError, AttributeError, TypeError):
+            return None   # without its time, a game can't be placed
+        return {"when": g["when"], "state": text_of(g.get("state"), 8, "pre"), "detail": text_of(g.get("detail"), 40),
+                "home": g.get("home") is True, "them": text_of(g.get("them"), 6, "?"), "them_logo": text_or_none(g.get("them_logo"), 300),
+                "us_score": points(g.get("us_score")), "them_score": points(g.get("them_score")),
+                "won": g["won"] if isinstance(g.get("won"), bool) else None, "tv": text_or_none(g.get("tv"), 40)}
+
+    if not isinstance(data, dict) or not isinstance(data.get("teams"), list):
+        return None
     try:
         aware(data["fetched"])
-        teams = data["teams"]
-        assert isinstance(teams, list) and teams
-        for t in teams:
-            assert TEAM_KEYS <= t.keys() and isinstance(t["label"], str) and isinstance(t["record"], str)
-            assert all(t[k] is None or isinstance(t[k], str) for k in ("logo", "color", "alt"))
-            for g in (t["next"], t["last"]):
-                if g is not None:
-                    assert GAME_KEYS <= g.keys() and isinstance(g["them"], str) and isinstance(g["state"], str)
-                    assert isinstance(g["detail"], str) and aware(g["when"])
-                    assert all(g[k] is None or isinstance(g[k], str) for k in ("them_logo", "tv"))
-        return True
-    except (KeyError, TypeError, ValueError, AttributeError, AssertionError):
-        return False
+    except (KeyError, ValueError, AttributeError, TypeError):
+        return None
+    teams = [{"label": text_of(t.get("label"), 12, "?"), "id": str(t.get("id", ""))[:20], "color": text_or_none(t.get("color"), 6),
+              "alt": text_or_none(t.get("alt"), 6), "logo": text_or_none(t.get("logo"), 300), "record": text_of(t.get("record"), 12),
+              "next": game_of(t.get("next")), "last": game_of(t.get("last"))} for t in data["teams"] if isinstance(t, dict)]
+    return {"teams": teams[:len(TEAMS)], "fetched": data["fetched"]} if teams else None
 
 
 def when(iso, now):
@@ -263,7 +281,7 @@ class Page:
     fps = 2   # the LIVE dot
 
     def __init__(self, data=None):
-        self.fixed, self.data = data is not None, data
+        self.fixed, self.data = data is not None, clean(data)
         self.busy, self.mtime, self.logos, self.bg, self.last = False, None, {}, (None, None), None
         self.tried, self.loading, self.missed = 0, False, {}   # when we last asked ESPN; logos in hand; when each missing logo was tried
 
@@ -313,8 +331,7 @@ class Page:
                 try:
                     with open(CACHE) as f:
                         data = json.load(f)
-                    if valid(data):   # else keep the last good one
-                        self.data = data
+                    self.data = clean(data) or self.data   # else keep the last good one
                 except (OSError, ValueError):
                     pass
         if self.data and not self.loading and self.pending():
@@ -370,15 +387,18 @@ def check():
     pl = placeholder("PHI", 64)
     assert pl.size == (64, 64) and pl.getpixel((32, 32))[3] == 255 and pl.getpixel((0, 0))[3] == 0, "a crest, not blank"
     assert placeholder("", 64).size == (64, 64) and placeholder("DETROIT", 20).size == (20, 20)
-    assert valid(SAMPLE) and not valid(None) and not valid({}) and not valid({"teams": [], "fetched": "2026-10-15T21:40:00+00:00"})
-    assert not valid(dict(SAMPLE, teams=[{"label": "X"}])) and not valid(dict(SAMPLE, teams="nope")) and not valid(dict(SAMPLE, fetched="soon"))
-    assert not valid(dict(SAMPLE, teams=[dict(SAMPLE["teams"][0], next={"when": "now"})])), "a game missing its fields"
-    assert not valid(dict(SAMPLE, teams=[dict(SAMPLE["teams"][0], last=dict(SAMPLE["teams"][0]["last"], when="whenever"))]))
+    assert clean(SAMPLE) == SAMPLE and not clean(None) and not clean({}) and not clean({"teams": [], "fetched": "2026-10-15T21:40:00+00:00"})
+    assert not clean(dict(SAMPLE, teams="nope")) and not clean(dict(SAMPLE, fetched="soon")) and not clean(dict(SAMPLE, teams=[None, 5]))
+    assert clean(dict(SAMPLE, teams=[{"label": "X"}]))["teams"][0]["next"] is None, "a team missing its fields takes defaults"
     t0 = SAMPLE["teams"][0]
-    for bad in (dict(SAMPLE, fetched="2026-10-15T21:40:00"), dict(SAMPLE, teams=[dict(t0, logo=["x"])]), dict(SAMPLE, teams=[dict(t0, logo={"href": "x"})]),
+    assert clean(dict(SAMPLE, teams=[dict(t0, next={"when": "now"})]))["teams"][0]["next"] is None, "a game missing its fields"
+    assert clean(dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], when="whenever"))]))["teams"][0]["last"] is None
+    for bad in (dict(SAMPLE, fetched="2026-10-15T21:40:00"), dict(SAMPLE, teams=[dict(t0, logo=["x"])]), dict(SAMPLE, teams=[dict(t0, label=None, record=7)]),
                 dict(SAMPLE, teams=[dict(t0, next=dict(t0["next"], when="2026-10-18T17:00"))]), dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], them_logo=["x"]))]),
-                dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], tv=["NBC"]))])):
-        assert not valid(bad), "a naive time or a list/dict where a string goes would crash draw()"
+                dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], tv=["NBC"], us_score=10 ** 9, them="x" * 99))])):
+        assert draw(now, clean(bad), {}).size == SCREEN, "a naive time or a list/dict where a string goes is cleaned, not drawn"
+    last = clean(dict(SAMPLE, teams=[dict(t0, last=dict(t0["last"], tv=["NBC"], us_score=10 ** 9, them="x" * 99))]))["teams"][0]["last"]
+    assert (last["tv"], last["us_score"], last["them"]) == (None, "999", "xxxxxx"), "wrong types dropped, scores held, text cut"
     import tempfile
     class Reply(io.BytesIO):
         __enter__ = lambda self: self
@@ -466,7 +486,7 @@ def check():
     page = Page(data=SAMPLE)
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key
-    page.data = {"teams": [{"label": None}], "fetched": SAMPLE["fetched"]}   # a shape draw() can't take, past valid()
+    page.data = {"teams": [{"label": None}], "fetched": SAMPLE["fetched"]}   # a shape draw() can't take, past clean()
     key2, bad = page.background(now.replace(minute=41)); page.data = SAMPLE
     assert key2 != key and bad.size == bg.size and bad.tobytes() != bg.tobytes(), "a failed draw keeps the last frame, marked"
     marked = Page(data={"teams": [{"label": None}], "fetched": SAMPLE["fetched"]})
