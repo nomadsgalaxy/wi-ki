@@ -17,7 +17,8 @@ Pages live in pages/<name>/, one package each, and share only kit.py. A page pac
                               fastest thing to put on the screen, which now playing needs for 20 fps
   check()                   its self-test (raise AssertionError on failure)
   preview(now=None)         an RGB picture of it, for looking at without a Pi
-Images are "LA" images holding packed RGB565 (kit.packed()), which is what the framebuffer takes.
+Images are "LA" images holding packed RGB565 (kit.packed()), which is what the framebuffer takes. kit.Simple does all
+this for a page that only wants to say what it draws (docs/make.md).
 
 playlist.json lists the pages in order: {"page": "<name>", "seconds": <optional>, "options": {<optional, for Page>}}.
 A package can be in it more than once, with different options, if each has its own "name" (what the desktop and
@@ -34,7 +35,7 @@ pinned page starts over every time its seconds run out, so it still refreshes. T
   kiosk.py --web                 draw this shape (KIOSK_SHAPE) for browsers, and --front to serve them (see web.py)
   kiosk.py --check               every page's self-test (about 10 minutes on the Pi; deploy.sh runs it here)
   kiosk.py --smoke               the quick version the Pi runs before it applies an update
-  kiosk.py --png <page> FILE     a picture of a page
+  kiosk.py --png <page> FILE     a picture of a page, or a sheet of frames from a transition
 """
 import fcntl, importlib, json, mmap, os, socket, sys, threading, time
 from datetime import datetime
@@ -395,7 +396,12 @@ def check():
         def play(self, new, theme=None): self.mm[:] = new
     turns = iter(range(4))
     main(Screen(), until=lambda: next(turns, None) is None)
-    transitions.check()
+    check_simple()
+    check_templates()
+    try:
+        transitions.check()
+    finally:
+        transitions.THEMES.pop("_new", None)
     remote.check()
     web.check()
     check_steer()
@@ -410,6 +416,82 @@ def check():
     loaded = playlist()
     assert loaded and all(hasattr(p, a) for p in loaded for a in ("name", "seconds", "start", "background", "regions"))
     print(f"playlist: {' -> '.join(f'{p.name} ({p.seconds:g} s)' for p in loaded)}")
+
+
+def check_simple():
+    """kit.Simple as the display runs it: fetching into a cache every renderer shares, keeping its data when a fetch
+    fails, reading a file when it changes, and keeping its last picture when new data can't be drawn"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        cache, feed = os.path.join(folder, "cache.json"), os.path.join(folder, "feed.json")
+
+        class Page(kit.Simple):
+            name, every, cache, asked, answers = "simple", 600, None, [], [{"n": 1}, OSError("offline")]
+            def __init__(self, n=1):
+                self.n = n
+            def fetch(self):
+                self.asked.append(1)
+                got = self.answers.pop(0)
+                if isinstance(got, Exception):
+                    raise got
+                return got
+            def draw(self, img, now, data):
+                assert data["n"] < 2, "too many"
+            def moving(self, now, t, data):
+                return [(Image.new("RGB", (8, 8)), (0, 0))] if t < 1 else 1 / 0
+        now = datetime(2026, 10, 19, 9, 41)
+
+        def settle(page):
+            page.background(now)
+            for _ in range(200):
+                if not page._busy:
+                    break
+                time.sleep(0.01)
+            return page.background(now)
+        assert Page().where() == Page(n=1).where() != Page(n=2).where() and Page(n=2).options == {"n": 2}, "a cache for each set of options"
+        Page.cache = cache
+        page = Page(); settle(page)
+        assert page.data == {"n": 1} and page.updated and page.age() < 5, "the first fetch, into the cache, and read back"
+        other = Page(); other.background(now)
+        assert other.data == {"n": 1} and len(Page.asked) == 1, "another renderer reads the cache rather than fetching again"
+        os.utime(cache, (time.time() - 700,) * 2); page._tried = 0; settle(page)
+        assert page.data == {"n": 1} and isinstance(page.problem, OSError) and len(Page.asked) == 2, "a failed fetch keeps the data"
+        page.background(now); assert len(Page.asked) == 2, "and waits a minute before it tries again"
+        json.dump({"n": 5}, open(cache, "w")); key = page.background(now)[0]
+        assert page.data == {"n": 5} and page.failed == "AssertionError: too many" and page.background(now)[0] == key, \
+            "data that can't be drawn keeps the last picture, drawn once"
+        assert page.regions(now, 0)[0][0].mode == "LA" and page.regions(now, 2) == [] and "ZeroDivisionError" in page.failed, "what moves just stops"
+
+        class Fed(kit.Simple):
+            name, file = "fed", feed
+            def draw(self, img, now, data):
+                kit.text(img, (0, 0), str(data["n"]), kit.W)
+        fed = Fed(); fed.background(now)
+        assert fed.data is None and not fed.failed, "no file yet: the waiting screen"
+        json.dump({"n": 1}, open(feed, "w")); fed.background(now)
+        assert fed.data == {"n": 1}, "the file, once it's there"
+        open(feed, "w").write('{"n": '); os.utime(feed, (time.time() + 5,) * 2); fed.background(now)
+        assert fed.data == {"n": 1}, "a half-written file keeps the last"
+        json.dump({"n": 2}, open(feed, "w")); os.utime(feed, (time.time() + 10,) * 2); fed.background(now)
+        assert fed.data == {"n": 2}, "and it's read again when it changes"
+        assert not os.path.exists(os.path.join(folder, "fed")) and sorted(os.listdir(folder)) == ["cache.json", "feed.json"]
+
+
+def check_templates():
+    """catalog/new/'s templates, which catalog.py --new starts pages and transitions from, work as they are: the page's
+    own check(), and the transition joins the themes for transitions.check() (check() takes it out after)"""
+    import importlib.util
+    folder = os.path.join(HERE, "..", "catalog", "new")
+    if not os.path.isdir(folder):   # a kiosk has no catalog/new
+        return
+    for name, module in (("page", "_new"), ("transition", "transitions._new")):
+        spec = importlib.util.spec_from_file_location(module, os.path.join(folder, name + ".py"))
+        loaded = importlib.util.module_from_spec(spec); spec.loader.exec_module(loaded)
+        if name == "page":
+            loaded.check()
+            assert loaded.preview().size == kit.SCREEN
+        else:
+            transitions.THEMES["_new"] = loaded
 
 
 def check_touch():
@@ -490,7 +572,8 @@ if __name__ == "__main__":
     elif sys.argv[1:] == ["--smoke"]:
         smoke()
     elif sys.argv[1:2] == ["--png"] and len(sys.argv) == 4:
-        importlib.import_module(f"pages.{sys.argv[2]}").preview().save(sys.argv[3])
+        name = sys.argv[2]
+        (transitions.preview(name) if name in transitions.THEMES else importlib.import_module(f"pages.{name}").preview()).save(sys.argv[3])
     elif sys.argv[1:] == ["--web"]:
         main(web.Browser())
     elif sys.argv[1:] == ["--front"]:

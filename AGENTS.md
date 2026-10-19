@@ -1,6 +1,6 @@
 # Wi-Ki: notes for coding agents
 
-What you need to work on the code without breaking the Pi. `docs/` covers setting up a kiosk, a render server and connectors, and `docs/develop.md` running, testing and deploying.
+What you need to work on the code without breaking the Pi. `docs/` covers setting up a kiosk, a render server and connectors, `docs/make.md` making a page or a transition (`catalog/catalog.py --new`, `kit.Simple`, `canvas.simple()`), and `docs/develop.md` running, testing and deploying.
 
 ## The machine
 
@@ -22,7 +22,7 @@ A kiosk can have a render server (`kiosk.py --serve`, named in the kiosk's `~/.c
 
 ## Keep pages modular
 
-- **A page only imports from `kit.py`**, never from another page. Pages that share data share a file: the weather page writes `~/.cache/weather.json` (14 days), and the calendar reads it for each day's weather. The github and agents pages both read `~/.cache/kiosk/desk.json` from the desktop feed (`feed/`), through `kit.Feed`.
+- **A page only imports from `kit.py`**, never from another page. Pages that share data share a file: the weather page writes `~/.cache/weather.json` (14 days), and the calendar reads it for each day's weather. The github and agents pages both read `~/.cache/kiosk/desk.json` from the desktop feed (`feed/`), as their `kit.Simple` file.
 - **Shared things go in `kit.py`:** the screen size, colours, the VGA font and `text()`, packing, the weather icons. Add to it only what more than one page needs.
 - **Anything a page needs to be told goes in its options** (`Page(**options)` from `playlist.json`), with sensible defaults.
 - **Every page has `check()` and `preview()`.** `kiosk.py --check` runs them all, and `deploy.sh` won't deploy if one fails.

@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, text, clock, packed, local
+from kit import SCREEN, Simple, text, clock, packed, local
 
 API = "https://site.api.espn.com/apis/site/v2/sports/"
 LEAGUES = {"nfl": "football/nfl", "mlb": "baseball/mlb", "nhl": "hockey/nhl", "nba": "basketball/nba", "mls": "soccer/usa.1"}
@@ -290,90 +290,6 @@ def live(data):
     return False
 
 
-class Page:
-    """Philadelphia's teams, as a page of the kiosk's cycle"""
-    name, seconds = "sports", 20
-    fps = 2   # the LIVE dot
-
-    def __init__(self, data=None, teams=None):
-        self.fixed, self.data, self.teams = data is not None, clean(data), picked(teams)
-        self.cache = CACHE if self.teams == TEAMS else CACHE[:-5] + "-" + "-".join(k.replace("/", "") for k in self.teams) + ".json"
-        self.busy, self.mtime, self.logos, self.bg, self.last = False, None, {}, (None, None), None
-        self.tried, self.loading, self.missed = 0, False, {}   # when we last asked ESPN; logos in hand; when each missing logo was tried
-
-    def due(self, mtime, ts):
-        """whether it's time to ask ESPN: a while since the cache was written or since we last tried, whichever is later,
-        so a failed fetch waits its turn instead of retrying every tick (a minute, when there's no data at all)"""
-        wait = LIVE_EVERY if live(self.data) else EVERY
-        return ts - max(mtime or 0, self.tried) > (wait if self.data else min(wait, 60))
-
-    def fetch(self):
-        self.tried = time.time()
-        try:
-            data = fetch(self.teams)
-            os.makedirs(os.path.dirname(self.cache), exist_ok=True)
-            with open(self.cache + ".tmp", "w") as f:
-                json.dump(data, f)
-            os.replace(self.cache + ".tmp", self.cache)
-        except Exception as e:
-            print(f"sports: {e}", flush=True)
-        self.busy = False
-
-    def load_logos(self):
-        urls = {t.get("logo") for t in self.data["teams"]} | {g.get("them_logo") for t in self.data["teams"]
-                                                           for g in (t.get("next"), t.get("last")) if g}
-        for url in self.pending(urls):
-            self.logos[url] = logo(url, 128)
-            self.missed[url] = time.time()
-        self.loading = False
-
-    def pending(self, urls=None):
-        """the logos to fetch: new ones, and ones that failed more than RETRY_LOGO ago"""
-        if urls is None:
-            urls = {t.get("logo") for t in self.data["teams"]} | {g.get("them_logo") for t in self.data["teams"]
-                                                               for g in (t.get("next"), t.get("last")) if g}
-        return [u for u in urls if u and (u not in self.logos or self.logos[u] is None and time.time() - self.missed[u] > RETRY_LOGO)]
-
-    def start(self, now):
-        pass
-
-    def background(self, now):
-        if not self.fixed:
-            mtime = os.path.getmtime(self.cache) if os.path.exists(self.cache) else None
-            if not self.busy and self.due(mtime, time.time()):
-                self.busy = True; threading.Thread(target=self.fetch, daemon=True).start()
-            if mtime != self.mtime:
-                self.mtime = mtime
-                try:
-                    with open(self.cache) as f:
-                        data = json.load(f)
-                    self.data = clean(data) or self.data   # else keep the last good one
-                except (OSError, ValueError):
-                    pass
-        if self.data and not self.loading and self.pending():
-            self.loading = True
-            threading.Thread(target=self.load_logos, daemon=True).start()   # logos come in behind
-        key = (now.minute, self.mtime, sum(v is not None for v in self.logos.values()))
-        if key != self.bg[0]:
-            try:
-                self.last = draw(now, self.data, self.logos)
-            except Exception as e:   # keep the last good frame, marked, instead of freezing the page or the cycle
-                print(f"sports: can't draw: {e}", flush=True)
-                self.last = (self.last or Image.new("RGB", SCREEN, INK)).copy()
-                text(self.last, (SCREEN[0] - 12, 12), "CAN'T DRAW", LIVE, scale=1, right=True)
-            self.bg = (key, packed(self.last))
-        return self.bg
-
-    def regions(self, now, t):
-        """the LIVE dot beside each game that's on, on and off each second"""
-        out = []
-        for i, team in enumerate((self.data or {}).get("teams", [])):
-            if (team.get("next") or {}).get("state") == "in":
-                dot = Image.new("RGB", (14, 14), LIVE if int(t) % 2 == 0 else INK)
-                out.append((packed(dot), (left(self.data) + i * COL + COL - 30, 172)))
-        return out
-
-
 def _ev(state, detail, us, them, won=None, date="2026-10-15T23:30Z"):
     return {"when": date, "state": state, "detail": detail, "home": True, "them": "DET", "them_logo": None,
             "us_score": us, "them_score": them, "won": won, "tv": "NBC Sports Phil"}
@@ -390,6 +306,63 @@ SAMPLE = {"teams": [{"label": "EAGLES", "abbr": "PHI", "id": "21", "color": "064
                     {"label": "UNION", "abbr": "PHI", "id": "10739", "color": "051f31", "alt": "b19b69", "logo": None, "record": "13-6-10",
                      "next": _ev("pre", "10/17", None, None, date="2026-10-17T18:30Z"), "last": _ev("post", "FT", "2", "0", True)}],
           "fetched": "2026-10-15T21:40:00+00:00"}
+
+
+class Page(Simple):
+    """Philadelphia's teams, as a page of the kiosk's cycle"""
+    name, seconds, SAMPLE = "sports", 20, SAMPLE
+    fps = 2   # the LIVE dot
+    mark = (SCREEN[0] - 12, 12)
+
+    def __init__(self, teams=None):
+        self.teams, self.logos, self.missed, self.loading = picked(teams), {}, {}, False   # logos in hand; when each missing one was tried
+
+    @property
+    def cache(self):
+        """every Philly team keeps the cache it's always had; another set of teams gets its own"""
+        return CACHE if self.teams == TEAMS else CACHE[:-5] + "-" + "-".join(k.replace("/", "") for k in self.teams) + ".json"
+
+    @property
+    def every(self):
+        return LIVE_EVERY if live(self.data) else EVERY   # every 30 seconds while a game's on
+
+    def fetch(self):
+        return fetch(self.teams)
+
+    def clean(self, data):
+        return clean(data)
+
+    def load_logos(self):
+        for url in self.pending():
+            self.logos[url] = logo(url, 128)
+            self.missed[url] = time.time()
+        self.loading = False
+        self.redraw()
+
+    def pending(self, urls=None):
+        """the logos to fetch: new ones, and ones that failed more than RETRY_LOGO ago"""
+        if urls is None:
+            urls = {t.get("logo") for t in self.data["teams"]} | {g.get("them_logo") for t in self.data["teams"]
+                                                               for g in (t.get("next"), t.get("last")) if g}
+        return [u for u in urls if u and (u not in self.logos or self.logos[u] is None and time.time() - self.missed[u] > RETRY_LOGO)]
+
+    def background(self, now):
+        if self.data and not self.loading and not self._fixed and self.pending():
+            self.loading = True
+            threading.Thread(target=self.load_logos, daemon=True).start()   # logos come in behind
+        return super().background(now)
+
+    def draw(self, img, now, data):
+        img.paste(draw(now, data, self.logos))
+
+    def moving(self, now, t, data):
+        """the LIVE dot beside each game that's on, on and off each second"""
+        out = []
+        for i, team in enumerate((data or {}).get("teams", [])):
+            if (team.get("next") or {}).get("state") == "in":
+                dot = Image.new("RGB", (14, 14), LIVE if int(t) % 2 == 0 else INK)
+                out.append((dot, (left(data) + i * COL + COL - 30, 172)))
+        return out
 
 
 def check():
@@ -465,25 +438,19 @@ def check():
         API_OPENER.open = real_api
     col = column(now, SAMPLE["teams"][0], {})
     assert col.getpixel((50, 222)) != INK and col.getpixel((70, 70)) != hexrgb("06424d"), "no white tile or blank: a crest"
-    real_cache = CACHE
+    Page.check()
     with tempfile.TemporaryDirectory() as tmp:
-        globals()["CACHE"] = os.path.join(tmp, "sports.json")
-        try:
-            pg = Page(data=SAMPLE); pg.fixed, pg.tried = False, time.time()
-            for i, body in enumerate((dict(SAMPLE, fetched="2026-10-15T21:41:00+00:00"), {"teams": [{"label": 1}], "fetched": "x"})):
-                with open(CACHE, "w") as f:
-                    json.dump(body, f)
-                os.utime(CACHE, (1000 + i, 1000 + i)); pg.background(now)
-                assert pg.data["fetched"] == "2026-10-15T21:41:00+00:00", ("a good file is read", "a bad one is ignored")[i]
-        finally:
-            globals()["CACHE"] = real_cache
-    real_fetch, fetch = fetch, lambda teams: (_ for _ in ()).throw(OSError("ESPN is down (test)"))
-    try:
-        late = Page(); late.fetch()
-    finally:
-        fetch = real_fetch
-    assert late.tried > 0 and not late.due(None, late.tried + 30) and late.due(None, late.tried + 61), "a failed fetch backs off"
-    keep = Page(data=SAMPLE); keep.fixed = False
+        path = os.path.join(tmp, "sports.json")
+        pg = type("Here", (Page,), {"cache": path})()   # its cache in tmp
+        pg._tried = time.time()   # it just asked, so it reads rather than fetching
+        for i, body in enumerate((dict(SAMPLE, fetched="2026-10-15T21:41:00+00:00"), {"teams": [{"label": 1}], "fetched": "x"})):
+            with open(path, "w") as f:
+                json.dump(body, f)
+            os.utime(path, (time.time() + i,) * 2); pg.load()
+            assert pg.data["fetched"] == "2026-10-15T21:41:00+00:00", ("a good file is read", "a bad one is ignored")[i]
+    quiet = dict(SAMPLE, teams=[dict(t, next=None) for t in SAMPLE["teams"]])
+    assert Page.showing(SAMPLE).every == LIVE_EVERY and Page.showing(quiet).every == EVERY, "every 30 seconds while a game's on"
+    keep = Page.showing(SAMPLE)
     keep.logos = {"https://a.espncdn.com/x.png": None}; keep.missed = {"https://a.espncdn.com/x.png": time.time()}
     assert "https://a.espncdn.com/x.png" not in keep.pending({"https://a.espncdn.com/x.png"}), "a failed logo waits"
     keep.missed["https://a.espncdn.com/x.png"] -= RETRY_LOGO + 1
@@ -499,17 +466,15 @@ def check():
                          {"type": {"shortName": "TV"}, "market": {"type": "Home"}, "media": {"shortName": "NBC Sports Phil"}}]}]}
     g = game(ev, "15")
     assert (g["them"], g["us_score"], g["them_score"], g["won"], g["home"], g["tv"]) == ("SEA", "2", "3", False, True, "NBC Sports Phil")
-    page = Page(data=SAMPLE)
+    page = Page.showing(SAMPLE)
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key
     page.data = {"teams": [{"label": None}], "fetched": SAMPLE["fetched"]}   # a shape draw() can't take, past clean()
     key2, bad = page.background(now.replace(minute=41)); page.data = SAMPLE
-    assert key2 != key and bad.size == bg.size and bad.tobytes() != bg.tobytes(), "a failed draw keeps the last frame, marked"
-    marked = Page(data={"teams": [{"label": None}], "fetched": SAMPLE["fetched"]})
-    assert marked.background(now)[1].size == bg.size, "and with no frame yet, a blank one"
+    assert key2 != key and bad.size == bg.size and bad.tobytes() != bg.tobytes() and page.failed, "a failed draw keeps the last frame, marked"
     on, off = page.regions(now, 0), page.regions(now, 1)
     assert picked(None) == TEAMS and picked(["nhl/15", "nhl/15", "xfl/1", "nba/../x", 7]) == ["nhl/15"] and len(picked(TEAMS * 2)) == MOST
-    one = Page(data=dict(SAMPLE, teams=SAMPLE["teams"][2:3]), teams=["nhl/15"])
+    one = Page.showing(dict(SAMPLE, teams=SAMPLE["teams"][2:3]), teams=["nhl/15"])
     assert one.cache.endswith("sports-nhl15.json") and Page().cache == CACHE, "a cache for each set of teams"
     assert one.regions(now, 0)[0][1][0] == (SCREEN[0] - COL) // 2 + COL - 30, "one team sits in the middle, its dot with it"
     assert len(on) == 1 and on[0][1] == off[0][1] and on[0][0].tobytes() != off[0][0].tobytes(), "the Flyers' LIVE dot blinks"
@@ -518,4 +483,4 @@ def check():
 def preview(now=None):
     """the sample, the Flyers mid-game, for the emulator and kiosk.py --png"""
     import kit
-    return kit.unpack(Page(data=SAMPLE).background(now or datetime(2026, 10, 15, 17, 40))[1])
+    return kit.unpack(Page.showing(SAMPLE).background(now or datetime(2026, 10, 15, 17, 40))[1])

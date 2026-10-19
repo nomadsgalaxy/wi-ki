@@ -10,6 +10,7 @@ Every kiosk runs the same code. What makes one kiosk different from another live
 - **[A render server](docs/server.md):** draws the pages for a kiosk, so a Pi Zero can show the heavy ones smoothly, and
   shows the kiosk in a browser.
 - **[Connectors](docs/connectors.md):** your desktop's repos, agents, system and music, and calendar events.
+- **[Making a page or a transition](docs/make.md):** one command starts it, and you fill in what it draws.
 - **[Working on Wi-Ki](docs/develop.md):** writing pages and transitions, the layout, tests and updates.
 
 ## What's in it

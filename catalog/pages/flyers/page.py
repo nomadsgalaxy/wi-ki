@@ -11,7 +11,7 @@ and a new year in CUPS.
 from datetime import date, datetime
 from PIL import Image, ImageDraw
 
-from kit import SCREEN, W, G, text, clock, packed, since
+from kit import SCREEN, W, G, Simple, text, clock, packed, since
 
 ORANGE, BLACK, SILVER, SHADE, SHINE = (0xf7, 0x49, 0x02), (0, 0, 0), (205, 210, 220), (130, 136, 150), (250, 252, 255)
 ARENA, LED_OFF, ICE, BOARDS = (12, 12, 16), (40, 18, 8), (214, 228, 238), (236, 238, 242)
@@ -273,25 +273,16 @@ def draw(now, won=LAST):
     return img
 
 
-class Page:
+class Page(Simple):
     """the wait, as a page of the kiosk's cycle"""
     name, seconds = "flyers", 15
 
     def __init__(self, won=LAST):
         date.fromisoformat(won)   # a bad date in the playlist fails here, so the page is left out and says why
-        self.won, self.bg = won, (None, None)
+        self.won = won
 
-    def start(self, now):
-        pass
-
-    def background(self, now):
-        key = (now.date(), now.minute)
-        if key != self.bg[0]:
-            self.bg = (key, packed(draw(now, self.won)))
-        return self.bg
-
-    def regions(self, now, t):
-        return []
+    def draw(self, img, now, data):
+        img.paste(draw(now, self.won))
 
 
 def check():
@@ -304,6 +295,7 @@ def check():
     assert wait(date(2027, 6, 14), now.date()) == (0, "coming up") and wait(date(1975, 5, 27), now.date())[0] == 18769
     for won in (LAST, "2027-06-14"):
         assert draw(now, won).size == SCREEN
+    Page.check()
     page = Page()
     key, bg = page.background(now)
     assert bg.mode == "LA" and page.background(now)[0] == key and page.regions(now, 0) == []
