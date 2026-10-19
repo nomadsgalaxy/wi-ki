@@ -265,7 +265,7 @@ class Simple:
     seconds, every, file, cache, SAMPLE = 20, 0, None, None, None
     mark = (SCREEN[0] - 24, SCREEN[1] - 40)   # where CAN'T DRAW goes (its right end), if that's in the way
     data, updated, problem, failed = None, None, None, None
-    _bg, _good, _busy, _tried, _mtime, _turn, _fixed = (None, None), None, False, 0.0, None, 0, False
+    _bg, _good, _busy, _tried, _mtime, _turn, _fixed, _where = (None, None), None, False, 0.0, None, 0, False, None
     options = {}
 
     def __init_subclass__(cls, **kw):
@@ -325,9 +325,11 @@ class Simple:
             return os.path.expanduser(self.file)
         if self.cache:
             return os.path.expanduser(self.cache)
-        import hashlib   # a cache for each set of options: two kiosks drawn on one server can want different teams
-        key = hashlib.sha1(json.dumps(self.options, sort_keys=True, default=repr).encode()).hexdigest()[:8]
-        return os.path.expanduser(f"~/.cache/kiosk/{type(self).name}-{key}.json")
+        if not self._where:   # a cache for each set of options: two kiosks drawn on one server can want different teams
+            import hashlib
+            key = hashlib.sha1(json.dumps(self.options, sort_keys=True, default=repr).encode()).hexdigest()[:8]
+            self._where = os.path.expanduser(f"~/.cache/kiosk/{type(self).name}-{key}.json")
+        return self._where
 
     def fetch_now(self, path=None):
         """fetch() into the cache, here and now (load() does it in the background when it's time)"""
