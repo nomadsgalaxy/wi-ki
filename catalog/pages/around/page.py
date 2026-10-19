@@ -17,6 +17,7 @@ goes in caches every renderer shares, and a failed fetch keeps the last one. Hiv
 uses them.
 
 Options (in playlist.json): view (default all); lat, lon, the middle (default Hive76); radius, in metres (default 1000).
+city, one of CITIES, sets everything below (and the middle) for a city we've tried, and any option given still wins.
 Another city's: place and area, for the title and the spot in the middle (default HIVE76 and Kensington); bikes, its
 bike share's GBFS feed, the folder with station_information.json in it, or null for none (default Indego's), and
 bike_share, its name; reports, "phl-carto", the address of an Open311 GeoReport v2 server (its open311/v2 folder,
@@ -44,6 +45,23 @@ EVERY, BIKES_EVERY, IDLE = 900, 60, 30   # seconds: city data, bikes, and how lo
 RETRY = 600                               # seconds before a fetch that failed is tried again (a success waits its EVERY)
 STALE_CITY, STALE_BIKES = 3600, 600       # seconds: older than this and the corner says so
 UA = {"User-Agent": "wi-ki around (github.com/nomadsgalaxy/wi-ki)"}
+# cities whose feeds answered when we tried them (2026-10-19): the middle is city hall. Only Philadelphia's and San
+# Francisco's 311 did (Chicago's and Boston's Open311 servers were down), so the rest get the map and their bikes
+CITIES = {
+    "philadelphia": dict(lat=HIVE76[0], lon=HIVE76[1], place="HIVE76", area="Kensington", bikes=INDEGO, bike_share="INDEGO",
+                         reports=PHL, permits=PHL),
+    "san-francisco": dict(lat=37.7793, lon=-122.4193, place="CITY HALL", area="San Francisco",
+                          bikes="https://gbfs.lyft.com/gbfs/2.3/bay/en/", bike_share="BAY WHEELS",
+                          reports="https://mobile311.sfgov.org/open311/v2", permits=None),
+    "chicago": dict(lat=41.8837, lon=-87.6319, place="CITY HALL", area="Chicago", bikes="https://gbfs.divvybikes.com/gbfs/en/",
+                    bike_share="DIVVY", reports=None, permits=None),
+    "boston": dict(lat=42.3603, lon=-71.0580, place="CITY HALL", area="Boston", bikes="https://gbfs.bluebikes.com/gbfs/en/",
+                   bike_share="BLUEBIKES", reports=None, permits=None),
+    "washington": dict(lat=38.8946, lon=-77.0313, place="CITY HALL", area="Washington, DC",
+                       bikes="https://gbfs.capitalbikeshare.com/gbfs/en/", bike_share="CAPITAL BIKESHARE", reports=None, permits=None),
+    "new-york": dict(lat=40.7128, lon=-74.0060, place="CITY HALL", area="New York", bikes="https://gbfs.citibikenyc.com/gbfs/en/",
+                     bike_share="CITI BIKE", reports=None, permits=None)}
+OWN = object()   # an option the playlist didn't give: the city's (JSON can't make this, so it never means a real value)
 VIEWS = [("all", "OVERVIEW"), ("reports", "311"), ("building", "BUILDING"), ("bikes", "BIKES")]
 MAP_W, PIX = 840, 2                       # the map: the left of the screen, drawn at half size and scaled up
 TAB_X, TAB_Y, TAB_W, TAB_H = 1192, 10, 170, 44
@@ -108,7 +126,8 @@ def fetch_bikes(lat, lon, count=6, feed=INDEGO):
     out = []
     for sid, s in info.items():
         st = status.get(sid, {})   # a station with no status says so (None), not 0 bikes and open
-        e = (st.get("num_bikes_available_types") or {}).get("electric", 0 if st else None)   # Indego's: classic, smart, electric
+        e = (st.get("num_bikes_available_types") or {}).get(   # Indego's: classic, smart, electric; Lyft's systems count them apart
+            "electric", st.get("num_ebikes_available", 0 if st else None))
         out.append({"name": s["name"], "lat": s["lat"], "lon": s["lon"], "far": math.hypot(*metres(lat, lon, s["lat"], s["lon"])),
                     "bikes": st.get("num_bikes_available"), "ebikes": e, "docks": st.get("num_docks_available"),
                     "open": bool(st["is_renting"]) if "is_renting" in st else None})
@@ -387,9 +406,13 @@ class Page:
     """the blocks around Hive76, as a page of the kiosk's cycle"""
     name, seconds = "around", 30
 
-    def __init__(self, view="all", lat=HIVE76[0], lon=HIVE76[1], radius=1000, data=None, place="HIVE76",
-                 area="Kensington", bikes=INDEGO, bike_share="INDEGO", reports=PHL, permits=PHL):
+    def __init__(self, view="all", lat=OWN, lon=OWN, radius=1000, data=None, place=OWN, area=OWN, bikes=OWN, bike_share=OWN,
+                 reports=OWN, permits=OWN, city="philadelphia"):
         assert view in dict(VIEWS), f"view is one of {', '.join(dict(VIEWS))}"
+        assert city in CITIES, f"city is one of {', '.join(CITIES)}"
+        given = dict(lat=lat, lon=lon, place=place, area=area, bikes=bikes, bike_share=bike_share, reports=reports, permits=permits)
+        own = {k: CITIES[city][k] if v is OWN else v for k, v in given.items()}
+        lat, lon, place, area, bikes, bike_share, reports, permits = (own[k] for k in given)
         for url in (bikes, reports):   # they're fetched, so only https, and only from a playlist someone wrote
             assert url in (None, PHL) or isinstance(url, str) and url.startswith("https://"), "a source has to be an https address"
         assert permits in (None, PHL), "permits are phl-carto or null"
@@ -639,7 +662,13 @@ def check():
     assert seattle.caches()[1][2]()["stations"] == [], "no bike share: no stations, and nothing fetched"
     assert "-" not in os.path.basename(Page().caches()[0][0]).split("_")[-1], "today's caches keep today's names"
     assert Page(reports=None).caches()[0][0] != Page().caches()[0][0], "and another source gets its own"
-    for bad in ({"bikes": "http://gbfs.example.org/"}, {"reports": "ftp://x"}, {"permits": "https://permits.example.org"}):
+    sf, mine = Page(city="san-francisco"), Page(city="san-francisco", lat=37.8, bikes=None)
+    assert sf.where["area"] == "San Francisco" and sf.where["city"] == "mobile311.sfgov.org" and sf.where["bike_share"] == "BAY WHEELS"
+    assert (mine.lat, sf.lon, mine.sources["bikes"], mine.sources["reports"]) == (37.8, -122.4193, None, sf.sources["reports"]), \
+        "a city fills in what the playlist doesn't say, and what it says wins"
+    assert Page(city="philadelphia").caches()[0][0] == Page().caches()[0][0] and Page().where["place"] == "HIVE76", "Philly as before"
+    assert all(c["bikes"] is None or c["bikes"].startswith("https://") for c in CITIES.values())
+    for bad in ({"bikes": "http://gbfs.example.org/"}, {"reports": "ftp://x"}, {"permits": "https://permits.example.org"}, {"city": "atlantis"}):
         try:
             Page(**bad)
         except AssertionError:
