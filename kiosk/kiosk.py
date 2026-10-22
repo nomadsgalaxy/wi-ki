@@ -364,7 +364,7 @@ def display():
     try:
         if where:
             try:
-                remote.client(where, screen.mm, stop=setup_page.urgent, touch=TOUCH, wake=WAKE)   # the Setup page is only ever drawn here
+                remote.client(where, screen.mm, stop=setup_page.urgent, touch=TOUCH, wake=WAKE, delay=remote.delay())   # the Setup page is only ever drawn here
             except Exception as e:   # unreachable, hung up, or garbled: draw it ourselves
                 print(f"remote: {e}; drawing locally for now", file=sys.stderr)
         ready = back(where) if where else None
