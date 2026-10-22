@@ -119,6 +119,10 @@ them. A Pi 4 with 8 GB runs several kiosks this way.
 - **While the Pi plays a transition, the server holds the next frames** until the Pi says it's done, however long
   the theme takes on the Pi. A server or a Pi from before this guesses from the theme's length instead, which is
   wrong for a long theme, and then the page runs fast for a moment while the Pi catches up.
+- **The Pi shows each frame a moment after the server drew it** (0.4 s), so a Wi-Fi link that stalls and then delivers
+  a clump still plays out as the server drew it, instead of a freeze and a rush. A stall longer than that still
+  shows. `"delay"` in the kiosk's `remote.json` (seconds, `0` for none) changes it: a longer delay hides worse
+  Wi-Fi at the cost of everything lagging by that much. A touch's answer isn't held.
 - **If the Pi can't reach the server,** or the link drops, the Pi draws its own pages and tries the server again every
   minute. So a server that's down just makes the kiosk slower, not blank, and it switches back by itself.
 - **The playlist lives on the server,** in the server's own `~/.config/kiosk/`. The kiosk's own playlist is only used
