@@ -60,7 +60,7 @@ runcmd:
   - chown -R kiosk:kiosk /home/kiosk/.config
 """ + ("""  - DEBIAN_FRONTEND=noninteractive apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install -y python3-pil git
   - runuser -u kiosk -- git clone -q https://github.com/nomadsgalaxy/wi-ki.git /home/kiosk/wi-ki
-  - python3 -I /home/kiosk/wi-ki/kiosk/autoupdate.py
+  - python3 -B -I /home/kiosk/wi-ki/kiosk/autoupdate.py
   - bash /home/kiosk/wi-ki/setup/pi-setup.sh
 power_state:
   mode: reboot
