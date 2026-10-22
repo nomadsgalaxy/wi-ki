@@ -19,6 +19,12 @@ Every message is a 12-byte header (kind, a, payload length) and its payload:
         is only what's changed since: a touch doesn't wait for the page to be drawn and sent
 and one the Pi sends the other way:
   TUCH  a touch on the Pi's screen, as JSON (see kiosk.py's TOUCH): the server hands it to the page it's drawing
+  DONE  how many transitions (and slides) the Pi has played since it connected, as JSON {"played": 3}. It sends one as
+        soon as the server first speaks, which says it will answer, and one after each. (Not on connecting: a Pi
+        says nothing then, and a server hangs up on anything else.) A server that's been told holds the next frames
+        until the Pi has played everything it was sent, however long a theme takes on the Pi; without one, it holds for
+        the theme's length, a guess (a server doesn't load the themes, so it never knew their real lengths). A server
+        from before this ignores it, since it isn't a touch
 
 REMOTE (~/.config/kiosk/remote.json) says where the server is: {"server": "<address>", "port": 7676}. Without it, or
 when it can't be reached, the Pi draws the pages itself.
@@ -77,6 +83,8 @@ class Server:
     def __init__(self, port, touch=None, poke=lambda: None):
         self.mm, self.sent, self.conn, self.quiet, self.pinged = bytearray(SIZE), None, None, 0.0, 0.0
         self.touch, self.poke = touch, poke   # where the Pi's touches go (kiosk.py's TOUCH), and what wakes the display
+        self.acks, self.expected, self.played = False, 0, 0   # does the Pi say when a transition is done (DONE), and how
+                                                              # many it's been sent and has played
         self.kept, self.current = {}, None   # each page's last frame, as the Pi keeps it (see SHOW), and the page up
         self.listener = socket.create_server(("", port), reuse_port=False)
         threading.Thread(target=self.accept, daemon=True).start()
@@ -102,6 +110,7 @@ class Server:
             if self.conn:
                 self.conn.close()
             self.sent, self.conn = None, conn   # a new connection gets the whole screen
+            self.acks, self.expected, self.played, self.quiet = False, 0, 0, 0.0   # and no transition in flight
             self.kept, self.current = {}, None   # and starts with nothing kept, as the Pi does
             threading.Thread(target=self.touches, args=(conn,), daemon=True).start()
 
@@ -117,8 +126,23 @@ class Server:
                     os.makedirs(os.path.dirname(self.touch), exist_ok=True)
                     json.dump(at, open(self.touch + ".tmp", "w")); os.replace(self.touch + ".tmp", self.touch)
                     self.poke()
+                elif kind == b"DONE" and isinstance(at, dict) and isinstance(at.get("played"), int):
+                    self.done(at["played"])
         except (OSError, ValueError, ConnectionError, struct.error):
             pass   # it hung up, or sent nonsense: the screen's side finds out on its next send
+
+    def done(self, played):
+        """the Pi says how many transitions it has played: once it's played all it was sent, frames can go again"""
+        self.acks, self.played = True, max(self.played, played)
+        if self.played >= self.expected:
+            self.quiet = 0.0
+
+    def hold(self, seconds):
+        """no frames while the Pi plays a transition, which must be called before the transition is sent, since the
+        Pi's DONE can be back before send() returns. If the Pi answers, until it has (seconds + 5 s is the longest to
+        wait, if it never does); if not, for the theme's length, as a guess"""
+        self.expected += 1
+        self.quiet = time.time() + seconds + (5 if self.acks else 0.5)
 
     def send(self, kind, a, payload=b""):
         try:
@@ -140,11 +164,11 @@ class Server:
             self.kept[self.current] = self.sent   # what the Pi has on screen now, which it keeps too
         up = instant and name in self.kept
         how = (2 if transitions.SLIDES.get(theme) == 1 else 3) if up and theme in transitions.SLIDES else int(up)
+        if how > 1 and self.conn:   # the Pi's about to slide: what changed can wait till it's done
+            self.hold(transitions.SLIDE + 0.2)
         shown = bool(self.conn) and self.send(b"SHOW", how, name.encode()) and up
         if shown:
             self.sent = self.kept[name]
-            if how > 1:   # the Pi's sliding: what changed can wait till it's done
-                self.quiet = time.time() + transitions.SLIDE + 0.2
         self.current = name
         return shown
 
@@ -153,12 +177,12 @@ class Server:
         self.mm[:] = new
         if self.conn:
             name = theme or next(transitions.ORDER)
+            # the theme's own length if it's loaded here; if not (a server doesn't load them), the usual one. That only
+            # matters to a Pi that doesn't say when it's done: one that does is waited for
+            seconds = transitions.SLIDE if name in transitions.SLIDES else getattr(transitions.THEMES[name], "SECONDS", transitions.SECONDS)
+            self.hold(seconds)
             if self.send(b"TRAN", len(name), name.encode() + zlib.compress(new, 1)):
                 self.sent = bytes(new)
-                # the theme's own length if it's loaded here; if not (a server doesn't load them), the usual one: a
-                # longer theme's frames just wait on the Pi, which reads the next message once the transition's done
-                seconds = transitions.SLIDE if name in transitions.SLIDES else getattr(transitions.THEMES[name], "SECONDS", transitions.SECONDS)
-                self.quiet = time.time() + seconds + 0.5
 
     def flush(self):
         """after a frame: send the Pi what changed, or a ping if it's been a while"""
@@ -194,18 +218,20 @@ def read(sock, n):
     return bytes(data)
 
 
-def forward(sock, touch, wake):
+def forward(sock, touch, wake, lock=None):
     """the Pi's touches (its touch file, written by touchpanel.py) up the link to the server, until it closes. wake is
     set the moment there's a touch (kiosk.py's WAKE), so it goes straight away; the timeout is for anything else that
     writes the file, like kiosk-ctl."""
     seen = os.path.getmtime(touch) if os.path.exists(touch) else None
+    lock = lock or threading.Lock()   # the socket has other writers (the transitions' DONE): one message at a time
     while True:
         wake.wait(0.1); wake.clear()
         try:
             mtime = os.path.getmtime(touch)
             if mtime != seen:
                 seen, body = mtime, open(touch, "rb").read()
-                sock.sendall(HEADER.pack(b"TUCH", 0, len(body)) + body)
+                with lock:
+                    sock.sendall(HEADER.pack(b"TUCH", 0, len(body)) + body)
         except FileNotFoundError:
             pass
         except OSError:
@@ -218,13 +244,26 @@ def client(address, mm, play=transitions.play, stop=None, touch=None, wake=None)
     touch: the Pi's touch file, whose touches go up to the server, and wake what says there's a new one."""
     sock = socket.create_connection(address, timeout=5)
     sock.settimeout(TIMEOUT)
+    lock, played = threading.Lock(), [0]
+
+    def tell():
+        """DONE: how many transitions this Pi has played, so the server knows when to send frames again"""
+        body = json.dumps({"played": played[0]}).encode()
+        with lock:
+            sock.sendall(HEADER.pack(b"DONE", 0, len(body)) + body)
+
+    def play_one(*args):
+        play(*args)
+        played[0] += 1; tell()
     if touch:
-        threading.Thread(target=forward, args=(sock, touch, wake or threading.Event()), daemon=True).start()
+        threading.Thread(target=forward, args=(sock, touch, wake or threading.Event(), lock), daemon=True).start()
     print(f"remote: showing {address[0]}:{address[1]}", flush=True)
-    kept, current = {}, None   # each page's last frame, as the server keeps it (see SHOW)
+    kept, current, heard = {}, None, False   # each page's last frame, as the server keeps it (see SHOW)
     while True:
         kind, a, n = HEADER.unpack(read(sock, HEADER.size))
         payload = read(sock, n)
+        if not heard:   # once the server has spoken, it's taken us for a Pi: now we can say we answer transitions. Not
+            heard = True; tell()   # before, since a server that hears anything first takes it for a settings message
         if kind == b"ROWS":
             rows = zlib.decompress(payload)
             mm[a * STRIDE:a * STRIDE + len(rows)] = rows
@@ -233,7 +272,7 @@ def client(address, mm, play=transitions.play, stop=None, touch=None, wake=None)
             for i in range(len(rect) // w2):
                 o = (a + i) * STRIDE + x * 2; mm[o:o + w2] = rect[i * w2:(i + 1) * w2]
         elif kind == b"TRAN":
-            play(mm, zlib.decompress(payload[a:]), payload[:a].decode())
+            play_one(mm, zlib.decompress(payload[a:]), payload[:a].decode())
         elif kind == b"SHOW":
             if current is not None:
                 kept[current] = bytes(mm)
@@ -242,7 +281,7 @@ def client(address, mm, play=transitions.play, stop=None, touch=None, wake=None)
                 if a == 1:
                     mm[:] = kept[current]
                 else:   # a swipe: slide it in, the way the finger went
-                    play(mm, kept[current], "slide-next" if a == 2 else "slide-prev")
+                    play_one(mm, kept[current], "slide-next" if a == 2 else "slide-prev")
         if stop and stop():
             sock.close()
             return
@@ -257,9 +296,10 @@ def check():
     assert columns(new, new, 0, 515) == (kit.SCREEN[0], 0), "nothing changed, nothing to send"
     # the whole round trip, over loopback: a full screen, some changed rows, a transition
     server = Server(0); port = server.listener.getsockname()[1]
-    seen, mm = [], bytearray(SIZE)
+    seen, mm, gate = [], bytearray(SIZE), threading.Event()
+    gate.set()   # clear it and a transition takes as long as the test wants, like a slow Pi
     def fake_play(mm, frame, name):
-        seen.append(name); mm[:] = frame
+        gate.wait(10); seen.append(name); mm[:] = frame
     done = threading.Event()
     pi = threading.Thread(target=lambda: client(("127.0.0.1", port), mm, fake_play, stop=done.is_set), daemon=True)
     pi.start()
@@ -282,6 +322,44 @@ def check():
             break
         time.sleep(0.02)
     assert mm == server.mm, "and keeps up after the transition"
+    # the Pi says when a transition is done, and the server waits for that, not for a guess at the theme's length
+    for _ in range(100):
+        if server.acks and server.played == server.expected:
+            break
+        time.sleep(0.02)
+    assert server.acks and server.played == server.expected == 1, "it said it answers, and has played the one"
+    sends = []; real_send = server.send
+    server.send = lambda kind, a, p=b"": sends.append(kind) or real_send(kind, a, p)
+    theme = next(iter(transitions.THEMES))
+    gate.clear()                                  # a slow Pi: still playing
+    server.mm[:] = bytes([8]) * SIZE; server.play(bytes([8]) * SIZE, theme)
+    held = server.quiet - time.time()
+    server.mm[0:2] = b"\xaa\xaa"; server.flush(); time.sleep(0.3); server.flush()
+    assert sends == [b"TRAN"], f"nothing but the transition goes while the Pi is still playing it: {sends}"
+    gate.set()                                    # it's done
+    for _ in range(100):
+        if server.quiet == 0.0:
+            break
+        time.sleep(0.02)
+    assert server.quiet == 0.0 and held > 3, "its DONE lets frames go well before the cap, which was %.1f s off" % held
+    server.flush()
+    for _ in range(100):
+        if mm[0:2] == b"\xaa\xaa":
+            break
+        time.sleep(0.02)
+    assert sends == [b"TRAN", b"RECT"] and mm == server.mm, f"and then the change goes: {sends}"
+    # one that never says: the theme's length, as before (and the Pi, held in its transition, can't have said)
+    server.acks = False; gate.clear(); server.expected = server.played = 0
+    server.play(bytes([9]) * SIZE, theme)
+    guess = server.quiet - time.time()
+    assert abs(held - guess - 4.5) < .3, f"without DONE it holds {guess:.1f} s, not {held:.1f}: 4.5 s less"
+    gate.set()
+    for _ in range(100):
+        if mm == server.mm:
+            break
+        time.sleep(0.02)
+    assert mm == server.mm
+    server.send = real_send; seen.clear()
     # a settings message, or anything else that isn't a Pi, gets its own answer and leaves the Pi's screen alone
     pi_conn = server.conn
     try:
