@@ -25,6 +25,7 @@ __path__ += [os.path.join(HERE, "..", "..", "catalog", "transitions"), os.path.e
 from .canvas import Canvas
 
 SECONDS, FPS = 3, 24   # slow enough to watch; 24 fps is what the busiest one manages on the Pi
+MAXIMUM = 5            # seconds: johnny5's length, the longest a theme should run (check() holds them to it)
 FIRST = ("coreone", "hive76", "nomadsgalaxy", "matrix", "hackerman", "johnny5")   # the order they've always taken turns in
 
 
@@ -126,6 +127,7 @@ def check():
         play(mm, new, name, fps=None, on_frame=lambda c: frames.append(bytes(c.mm)))
         assert mm == new, f"{name} ends on the new page"
         want = round(getattr(THEMES[name], "SECONDS", SECONDS) * FPS)
+        assert want <= MAXIMUM * FPS, f"{name} runs {want / FPS:g} s, and no theme should run longer than {MAXIMUM} s"
         assert abs(len(frames) - want) <= want // 8, f"{name} takes {len(frames)} frames, not ~{want}"
         assert frames[0].count(b"\x00\x00"), f"{name} starts from the old page"
         assert any(f.count(b"\x55\x55") for f in frames[:-2]), f"{name} shows the new page, not just snaps to it"

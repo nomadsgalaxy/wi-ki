@@ -16,13 +16,13 @@ import kit
 from . import FPS
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-# his performance, 10 s in all: "I'M ESCAPING TO THE ONE PLACE" alone for
-# 2.2 s, "NOT CORRUPTED" 0.8 s, "BY CAPITALISM..." 0.8 s, then 2 s of withheld laughter, then he throws his head back
-# for SPACE!!!!
-LINES_AT = (0, 2.2, 3)  # seconds into his talking that each line of the banner comes up
-SPEAK = 3.8             # seconds he talks, through the three lines
-SHOUT_HOLD = 1.2        # seconds SPACE!!!! holds once it's formed, to be read
-BEATS = {"drop": .35, "rise": .4, "talk": None, "shout": None, "shake": .3, "launch": 1.2}   # talk and shout: below
+# his performance, 5 s in all (no theme runs longer than johnny5): "I'M ESCAPING TO THE ONE PLACE" alone for
+# 0.85 s, "NOT CORRUPTED" 0.35 s, "BY CAPITALISM..." 0.3 s, then 0.8 s of withheld laughter, then he throws his head
+# back for SPACE!!!!
+LINES_AT = (0, .85, 1.2)  # seconds into his talking that each line of the banner comes up
+SPEAK = 1.5             # seconds he talks, through the three lines
+SHOUT_HOLD = .5         # seconds SPACE!!!! holds once it's formed, to be read
+BEATS = {"drop": .25, "rise": .25, "talk": None, "shout": None, "shake": .2, "launch": .95}   # talk and shout: below
 RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
 CREAM, NAVY, TEAL = (238, 226, 198), (20, 24, 40), (40, 150, 140)   # the poster's paper, its dark fields, its cool accent
 
@@ -41,9 +41,9 @@ FIG_W, FIG_H = 255 * K, TALK_ART.height * K   # the box he's drawn in, a little 
 FIG_X, FIG_Y = 107, HEIGHT - FIG_H             # centred in the first panel
 SPEAKING = [11, 0, 1, 2, 6, 10, 0, 1, 2, 6, 4]   # the frames he talks through, in order: a smirk before he starts,
                                                  # his open-mouthed frames, and his straight face (4) to finish
-LAUGH = [(11, .45), (5, .15), (11, .4), (5, .15), (11, .35), (3, .5)]   # (frame, seconds): withheld laughter, the smirk
+LAUGH = [(11, .14), (5, .09), (11, .12), (5, .09), (11, .16), (3, .2)]   # each flip is 2+ frames: a blend, then the pose   # (frame, seconds): withheld laughter, the smirk
                                                  # breaking into a grin and back, twice, then nearly bursting
-LOOKING = [(7, .15), (8, .15), (9, .2)]          # then his head goes back: eyes up, looking up, and the grin he shouts with
+LOOKING = [(7, .1), (8, .1), (9, .1)]          # then his head goes back: eyes up, looking up, and the grin he shouts with
 SCRIPT = [(f, SPEAK / len(SPEAKING)) for f in SPEAKING] + LAUGH + LOOKING   # all of it, (frame, seconds)
 BEATS["talk"] = sum(t for _, t in SCRIPT)
 
@@ -233,8 +233,7 @@ def shout_steps():
 
 SHOUT_STEPS = shout_steps()
 BEATS["shout"] = len(SHOUT_STEPS) / FPS + SHOUT_HOLD
-SECONDS = sum(BEATS.values())   # 10 s, 240 frames; a render server's kiosk gives up after 20 s quiet (remote.py), so
-                                # a transition stays well under that
+SECONDS = sum(BEATS.values())   # 5 s, 120 frames: johnny5's length, which is the longest a theme should run
 STILL = BEATS["talk"] + SHOUT_HOLD   # seconds it holds still on purpose, to be read: his line, his laughter and the
                                      # shout (only his face moves); transitions.check() wants the rest moving
 SOLID = bytes(1 if v >= 128 else 0 for v in range(256))   # an alpha byte -> 1 where canvas.sprite counts it solid
@@ -305,7 +304,7 @@ def ease_in(t):
 
 
 def frames(c, count):
-    """count frames (240 by default), in BEATS: the panels drop in, one then the other; he rises; he plays SCRIPT, his
+    """count frames (120 by default), in BEATS: the panels drop in, one then the other; he rises; he plays SCRIPT, his
     line coming up a line at a time (LINES_AT), then holding in his laughter, then throwing his head back; SPACE!!!!
     goes off (the rays, the trail, the word sliding up onto it) and holds; the screen shakes; and the whole page blasts
     off the top on its flame, the new page coming up from below. Times are shares of SECONDS, so any count keeps the
@@ -383,12 +382,13 @@ def check():
     assert len({step[4] for step in SHOUT_STEPS}) == len(SHOUT_STEPS), "every step of the shout is a step"
     from .canvas import Canvas
     size = WIDTH * HEIGHT * 2
-    # his timing: the first line alone over 2 s (six words), the next two most of a second each, 2 s holding in his
-    # laughter with all of it up, the shout formed for over a second, 10 s in all; STILL claims no more than the holds
-    assert LINES_AT[0] == 0 and LINES_AT[1] >= 2 and all(b - a >= .75 for a, b in zip(LINES_AT[1:], LINES_AT[2:] + (SPEAK,)))
-    assert abs(sum(t for _, t in LAUGH) - 2) < .05, "his withheld laughter, 2 s"
-    assert SHOUT_HOLD >= 1.2, "time to read SPACE!!!!"
-    assert STILL <= BEATS["talk"] + SHOUT_HOLD and abs(SECONDS - 10) < .05, "10 s, well under the render server's 20 s"
+    # his timing: the first line alone for most of a second (six words), the next two a third of a second each, nearly
+    # a second holding in his laughter with all of it up, the shout formed for half a second, 5 s in all; STILL claims
+    # no more than the holds
+    assert LINES_AT[0] == 0 and LINES_AT[1] >= .8 and all(b - a >= .3 for a, b in zip(LINES_AT[1:], LINES_AT[2:] + (SPEAK,)))
+    assert abs(sum(t for _, t in LAUGH) - .8) < .05, "his withheld laughter, 0.8 s"
+    assert SHOUT_HOLD >= .5, "time to read SPACE!!!!"
+    assert STILL <= BEATS["talk"] + SHOUT_HOLD and abs(SECONDS - 5) < .05, "5 s, johnny5's length"
     # the flame never lands on the poster in his panel's columns: every frame, drawn with and without it, may only
     # differ there on rows the new page already shows
     count, cols = round(SECONDS * FPS), slice(0, (P1[2] + 8) * 2)
