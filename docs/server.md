@@ -116,6 +116,9 @@ them. A Pi 4 with 8 GB runs several kiosks this way.
 
 - After every frame, the server sends the Pi only the rows that changed, compressed. On a page change it sends the new
   page and which transition to play, and the Pi plays it itself.
+- **While the Pi plays a transition, the server holds the next frames** until the Pi says it's done, however long
+  the theme takes on the Pi. A server or a Pi from before this guesses from the theme's length instead, which is
+  wrong for a long theme, and then the page runs fast for a moment while the Pi catches up.
 - **If the Pi can't reach the server,** or the link drops, the Pi draws its own pages and tries the server again every
   minute. So a server that's down just makes the kiosk slower, not blank, and it switches back by itself.
 - **The playlist lives on the server,** in the server's own `~/.config/kiosk/`. The kiosk's own playlist is only used
