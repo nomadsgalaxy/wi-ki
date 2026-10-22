@@ -80,6 +80,16 @@ chown kiosk:kiosk /home/kiosk/.bash_profile
 for extra in consoleblank=0 systemd.show_status=0; do
   grep -q "$extra" /boot/firmware/cmdline.txt || sed -i "1 s/\$/ $extra/" /boot/firmware/cmdline.txt
 done
+
+# A Pi Zero has one slow core, and the display waits on it at every boot, so leave out what it only needs once or never.
+# cloud-init has done its job by now (the network config is in /etc/netplan), and nothing here uses Bluetooth, man-db or
+# e2scrub. The apt timers stay on, so updates keep coming, but they don't run a catch-up job at boot.
+install -d /etc/cloud && touch /etc/cloud/cloud-init.disabled
+systemctl disable --now man-db.timer e2scrub_all.timer bluetooth.service >/dev/null 2>&1 || true
+for t in apt-daily apt-daily-upgrade; do
+  install -d "/etc/systemd/system/$t.timer.d"
+  printf '[Timer]\nPersistent=false\n' > "/etc/systemd/system/$t.timer.d/no-boot-catchup.conf"
+done
 fi
 
 # updates from GitHub: the repo is public, so the kiosk user clones it over https and needs no key
