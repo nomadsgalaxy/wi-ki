@@ -421,7 +421,12 @@ class Simple:
         """the self-test every Simple page gets: it draws with no data yet and SAMPLE, and what moves has to stay on the
         screen. Then SAMPLE broken tries ways (fuzz.py): the page has to stay up, though draw() may refuse the data (it
         keeps its last picture). python3 -I kiosk/fuzz.py <page> says which broken data it refused, and why"""
-        import contextlib, copy, io, random, fuzz
+        import contextlib, copy, inspect, io, random, fuzz
+        for name in ("where", "load", "fetch_now", "picture", "background", "regions", "age", "redraw"):   # Simple's own
+            mine, its = getattr(cls, name), getattr(Simple, name)
+            if mine is not its and list(inspect.signature(mine).parameters) != list(inspect.signature(its).parameters):
+                raise AssertionError(f"{cls.name}: its {name}() takes the place of Simple's, which kit calls as "
+                                     f"{name}{inspect.signature(its)}: give it another name")
         now = datetime(2026, 10, 19, 9, 41)
         for n in range(-1, tries + 1):
             data = None if n < 0 else cls.SAMPLE if n == 0 else fuzz.mangle(copy.deepcopy(cls.SAMPLE), random.Random(19000 + n))
