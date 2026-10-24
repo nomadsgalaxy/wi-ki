@@ -220,8 +220,7 @@ PlasmoidItem {
         Layout.preferredHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
         Layout.maximumHeight: Layout.preferredHeight
 
-        Rectangle {
-            anchors.fill: parent
+        background: Rectangle {   // the popup's own background slot: inside the layout, a box can't fill it
             color: root.space
             radius: 4
             border.color: root.rule
