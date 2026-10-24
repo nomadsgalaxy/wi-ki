@@ -33,7 +33,7 @@ PlasmoidItem {
     property var themes: []   // the transitions installed ("transitions" is taken: every Item has one)
     property var off: []
     property string error: ""
-    property bool busy: false
+    property bool waiting: false   // a command is on its way ("busy" is the widget's own, a spinner)
 
     // the kiosk's colours (kit.py): Deep Space, Raised Space, the Hairline, Warp Cyan, Starlight, Dust, Booster Amber
     readonly property color space: "#05060f"
@@ -98,7 +98,7 @@ PlasmoidItem {
                 } else {
                     // a change: ask again rather than assume (the kiosk switches pages within a quarter second, and
                     // a transition change restarts its display)
-                    root.busy = false;
+                    root.waiting = false;
                     if (data["exit code"] !== 0) {
                         root.error = failed || i18n("The kiosk said no");
                     }
@@ -118,10 +118,10 @@ PlasmoidItem {
     }
 
     function send(command) {
-        if (root.busy) {
+        if (root.waiting) {
             return;
         }
-        root.busy = true;
+        root.waiting = true;
         ask(command);
     }
 
@@ -182,10 +182,10 @@ PlasmoidItem {
 
         property string label
         property bool lit: false
-        property bool usable: !root.busy
+        property bool usable: !root.waiting
         signal pressed()
 
-        implicitHeight: Kirigami.Units.gridUnit * 1.6
+        implicitHeight: Kirigami.Units.gridUnit * 2.2
         implicitWidth: words.implicitWidth + Kirigami.Units.largeSpacing * 2
         radius: 2
         color: lit ? Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.14) : root.raised
@@ -199,7 +199,7 @@ PlasmoidItem {
             text: button.label
             color: button.lit ? root.cyan : root.starlight
             font.family: root.mono
-            font.pixelSize: Kirigami.Units.gridUnit * 0.7
+            font.pixelSize: Kirigami.Units.gridUnit * 0.95
         }
 
         MouseArea {
@@ -216,7 +216,7 @@ PlasmoidItem {
         id: popup
 
         // sized from its parts, never from itself: a popup bound to its own implicitHeight grows a little each layout
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 34
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 52
         Layout.preferredHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
         Layout.maximumHeight: Layout.preferredHeight
 
@@ -241,7 +241,7 @@ PlasmoidItem {
                     text: "// DESK KIOSK"
                     color: root.cyan
                     font.family: root.mono
-                    font.pixelSize: Kirigami.Units.gridUnit * 0.6
+                    font.pixelSize: Kirigami.Units.gridUnit * 0.8
                 }
                 Text {
                     Layout.fillWidth: true
@@ -249,7 +249,7 @@ PlasmoidItem {
                     text: root.toolTipSubText.toUpperCase()
                     color: root.error !== "" ? root.amber : root.starlight
                     font.family: root.mono
-                    font.pixelSize: Kirigami.Units.gridUnit * 0.95
+                    font.pixelSize: Kirigami.Units.gridUnit * 1.3
                     font.bold: true
                 }
             }
@@ -286,7 +286,7 @@ PlasmoidItem {
                 text: "// PAGES"
                 color: root.cyan
                 font.family: root.mono
-                font.pixelSize: Kirigami.Units.gridUnit * 0.6
+                font.pixelSize: Kirigami.Units.gridUnit * 0.8
             }
 
             // a picture of each page, the last time it was on: click to jump there and stay
@@ -294,7 +294,7 @@ PlasmoidItem {
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
                 Layout.rightMargin: Kirigami.Units.largeSpacing
-                columns: 3
+                columns: 4   // four across, so the whole rotation fits above a panel
                 columnSpacing: Kirigami.Units.smallSpacing
                 rowSpacing: Kirigami.Units.smallSpacing
 
@@ -307,11 +307,11 @@ PlasmoidItem {
 
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1   // the columns the same width
-                        Layout.preferredHeight: shot.height + name.implicitHeight + 6
+                        Layout.preferredHeight: shot.height + 4   // the picture's own shape; its name goes over it
                         color: root.raised
                         border.color: root.showing === modelData ? root.cyan : tileHover.containsMouse ? root.dust : root.rule
                         border.width: root.showing === modelData ? 2 : 1
-                        opacity: root.busy ? 0.6 : 1
+                        opacity: root.waiting ? 0.6 : 1
 
                         Image {
                             id: shot
@@ -326,8 +326,13 @@ PlasmoidItem {
                             visible: root.picture(tile.modelData) === ""
                             color: root.space
                         }
+                        Rectangle {   // a dark strip along the picture's bottom, for its name
+                            anchors { left: shot.left; right: shot.right; bottom: shot.bottom }
+                            height: name.implicitHeight + 4
+                            color: Qt.rgba(root.space.r, root.space.g, root.space.b, 0.8)
+                        }
                         RowLayout {
-                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 3 }
+                            anchors { left: shot.left; right: shot.right; bottom: shot.bottom; margins: 2; leftMargin: 4 }
                             spacing: 2
                             Text {
                                 id: name
@@ -336,7 +341,7 @@ PlasmoidItem {
                                 text: root.title(tile.modelData)
                                 color: root.showing === tile.modelData ? root.cyan : root.starlight
                                 font.family: root.mono
-                                font.pixelSize: Kirigami.Units.gridUnit * 0.6
+                                font.pixelSize: Kirigami.Units.gridUnit * 0.8
                             }
                             Kirigami.Icon {
                                 visible: root.pinned === tile.modelData
@@ -349,7 +354,7 @@ PlasmoidItem {
                             id: tileHover
                             anchors.fill: parent
                             hoverEnabled: true
-                            enabled: !root.busy
+                            enabled: !root.waiting
                             cursorShape: Qt.PointingHandCursor
                             onClicked: root.send("show " + tile.modelData)
                         }
@@ -367,12 +372,12 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     label: root.pinned !== "" ? "AUTO: BACK TO THE ROTATION" : "ROTATING"
                     lit: root.pinned === ""
-                    usable: !root.busy && root.pinned !== ""
+                    usable: !root.waiting && root.pinned !== ""
                     onPressed: root.send("auto")
                 }
                 KioskButton {
                     label: "NEXT ›"
-                    usable: !root.busy && root.pages.length > 0
+                    usable: !root.waiting && root.pages.length > 0
                     onPressed: root.send("next")
                 }
                 KioskButton {
@@ -387,7 +392,7 @@ PlasmoidItem {
                 text: "// TRANSITIONS · a change restarts the display"
                 color: root.cyan
                 font.family: root.mono
-                font.pixelSize: Kirigami.Units.gridUnit * 0.6
+                font.pixelSize: Kirigami.Units.gridUnit * 0.8
             }
 
             Flow {
