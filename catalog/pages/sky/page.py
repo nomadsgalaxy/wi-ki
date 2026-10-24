@@ -1,8 +1,8 @@
 """Sky: the kiosk's own sky, all the way round. The screen is a panorama of the horizon, north round to north with south
 in the middle (north, in the southern hemisphere), and the sky over it as it is now: blue by day with the sun where it
 is, a glow where it's setting, then dusk, and as it gets dark the stars come out, brightest first, with the
-constellations drawn between them and named, the planets, and the moon in its phase. Along the bottom, a town's
-rooftops, lit up at night. Above it, sunrise, sunset and the day's length, the moon's phase and next full and new,
+constellations drawn between them and named, the planets, and the moon in its phase. Along the bottom, a pixel
+skyline over the trees, in day, dusk or night colours by the sun, its windows lighting up as it gets dark. Above it, sunrise, sunset and the day's length, the moon's phase and next full and new,
 and tonight's clouds. During the day it says which planets will be up this evening.
 
 The sun, moon, planets and stars are all worked out here, from the date and the place, with no network. The sun is
@@ -14,7 +14,7 @@ they would. Without them the page still draws, just clear.
 Options (in playlist.json, or the setup page's Location): lat and lon (default: central Philadelphia), and place, for
 the heading.
 """
-import json, math, os, random, time, urllib.parse, urllib.request
+import json, math, os, time, urllib.parse, urllib.request
 from datetime import datetime, timedelta
 from PIL import Image, ImageChops, ImageDraw
 
@@ -24,7 +24,7 @@ J2000 = 946728000            # 2000-01-01 12:00 UTC, as a Unix time
 MONTH = 29.530588853         # days from new moon to new moon, on average
 RISE = -0.833                # the sun's height at sunrise and sunset: its radius, and the air bending its light
 TOP = 92                     # the panorama, under the masthead
-HORIZON = SCREEN[1] - 44     # the horizon; the town below it
+HORIZON = SCREEN[1] - 44     # the horizon; the skyline stands on it, the compass under it
 PX = SCREEN[0] / 360         # pixels a degree, round and up alike (5.3 on the bar: up to about 72 degrees shows)
 API = "https://api.open-meteo.com/v1/forecast?"
 UA = {"User-Agent": "wi-ki sky (github.com/nomadsgalaxy/wi-ki)"}
@@ -32,7 +32,7 @@ mix = lambda colour, k: tuple(round(c * k + b * (1 - k)) for c, b in zip(colour,
 # the sky's colour by the sun's height: (height, top of the sky, at the horizon); in between, a blend of the two nearest
 SKY = ((6, (30, 78, 120), (120, 176, 214)), (0, (40, 60, 110), (232, 142, 92)), (-6, (24, 26, 64), (110, 70, 110)),
        (-12, (10, 12, 34), (30, 30, 70)), (-18, BG, (12, 14, 32)))
-TOWN, WINDOW = (6, 7, 18), (255, 206, 106)
+TOWN = (6, 7, 18)            # the ground under the skyline
 TILT = math.radians(23.43928)   # the Earth's axial tilt, which turns the ecliptic into RA and Dec
 # the planets you can see without a telescope: JPL's Keplerian elements for 1800-2050 (Standish), each as its value at
 # J2000 and its change per century: a (au), e, I, L, the longitude of perihelion and of the ascending node (degrees)
@@ -52,6 +52,11 @@ PLANETS = {
 SHADE = {"MERCURY": G, "VENUS": W, "MARS": (255, 120, 90), "JUPITER": A, "SATURN": (230, 200, 140)}
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "stars.json")) as _f:
     STARMAP = json.load(_f)   # {"stars": [[RA, Dec, magnitude, B-V]], "lines": {constellation: [[[RA, Dec], ...]]}}
+# the skyline: pixel art 480x40, drawn 4 times bigger standing on the horizon. Its day, dusk and night colours share one
+# outline, so blending them never moves an edge; the lit windows are a layer of their own, faded in as it gets dark.
+# AI-generated from Anthony's reference photo, Philadelphia-inspired: decoration, not a survey of the real horizon
+_art = lambda name: Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), f"skyline-{name}.png")).convert("RGBA")
+SKYLINE = {name: _art(name).resize((SCREEN[0], 160), Image.NEAREST) for name in ("day", "dusk", "night", "windows")}
 
 
 def sky_place(ts, ra, dec, lat, lon):
@@ -237,7 +242,7 @@ class Page(Simple):
 
     def __init__(self, lat=39.95, lon=-75.17, place=None):
         self.lat, self.lon = max(-90.0, min(90.0, float(lat))), (float(lon) + 180) % 360 - 180
-        self.place, self.sunspot, self.behind = place, None, None
+        self.place, self.sunspot, self.behind, self.city = place, None, None, None
 
     def fetch(self):
         query = urllib.parse.urlencode({"latitude": self.lat, "longitude": self.lon, "timezone": "auto",
@@ -331,7 +336,7 @@ class Page(Simple):
                     if max(xs) - min(xs) < w / 2:
                         lx, ly = sum(xs) / len(xs), max(y for _, y in up) + 8
                         box = (lx - len(name) * 4, ly, lx + len(name) * 4, ly + 16)
-                        if box[3] < HORIZON - 40 and not any(box[0] < t[2] and t[0] < box[2] and box[1] < t[3] and t[1] < box[3] for t in taken):
+                        if box[3] < HORIZON - 60 and not any(box[0] < t[2] and t[0] < box[2] and box[1] < t[3] and t[1] < box[3] for t in taken):
                             text(img, (round(box[0]), round(ly)), name.upper(), line, scale=1); taken.append(box)
         if faintest > -1:
             for ra, dec, mag, bv in STARMAP["stars"]:
@@ -345,10 +350,11 @@ class Page(Simple):
                 r = 2 if mag < 1 else 1 if mag < 2.2 else 0.5 if mag < 3.5 else 0   # big enough to see across a room
                 d.rectangle((round(x - r), round(y - r), round(x + r), round(y + r)), fill=colour)
         # the planets that are up, and named, once it's dark enough for them to show
+        named = []   # their names go on after the skyline, so a low one behind the trees is still named
         for name, x, y, up, _ in self.planets(ts) if sun_up < -3 else []:
             if fit(x, y):
                 d.rectangle((round(x) - 3, round(y) - 3, round(x) + 3, round(y) + 3), fill=SHADE[name])
-                text(img, (round(x) + 8, round(y) - 6), name, SHADE[name], scale=1)
+                named.append((name, x, y))
         # the moon, in its phase, wherever it is (day or night)
         age, lit, phase = moon(ts)
         mx, my, moon_up = self.where(ts, *moon_place(ts))
@@ -359,7 +365,9 @@ class Page(Simple):
             part = img.crop((0, TOP, w, HORIZON))
             grey = (210, 214, 222) if sun_up > 0 else (34, 36, 48)
             img.paste(Image.blend(part, Image.new("RGB", part.size, grey), cover / 100 * 0.55), (0, TOP))
-        town(img, sun_up, 0 if self.lat < 0 else 180)
+        self.city = town(img, sun_up, 0 if self.lat < 0 else 180)
+        for name, x, y in named:
+            text(img, (round(x) + 8, round(y) - 6), name, SHADE[name], scale=1)
         # the sun, where it is: moving() draws it, so it can shine
         self.sunspot = (round(sx) - 24, round(sy) - 24) if sun_up > -2 and 0 <= sx - 24 and sx + 24 <= w and sy + 24 <= HORIZON else None
         if self.sunspot:
@@ -407,6 +415,10 @@ class Page(Simple):
             return []
         sun_ = icon("sun", int(t * 2) % 2).resize((48, 48), Image.NEAREST)
         out = self.behind.copy(); out.paste(sun_, (0, 0), sun_)
+        if self.city:   # and the skyline back in front of it, so it sets behind the buildings
+            x, y = self.sunspot
+            front = self.city.crop((x, y - (HORIZON - self.city.height), x + 48, y - (HORIZON - self.city.height) + 48))
+            out.paste(front, (0, 0), front)
         return [(out, self.sunspot)]
 
 
@@ -424,29 +436,37 @@ def blend(a, b, k):
     return tuple(round(x * k + y * (1 - k)) for x, y in zip(a, b))
 
 
+def city(sun_up):
+    """the skyline lit for the sun up degrees -> RGBA, the screen wide: day colours down to sunset, dusk's to 10
+    degrees under, then night's, and the windows on from just after sunset, all of them full by 8 degrees under"""
+    day, dusk, night = (SKYLINE[name] for name in ("day", "dusk", "night"))
+    if sun_up >= 6:
+        rgb = day
+    elif sun_up >= 0:
+        rgb = Image.blend(dusk, day, sun_up / 6)
+    elif sun_up >= -10:
+        rgb = Image.blend(dusk, night, -sun_up / 10)
+    else:
+        rgb = night
+    out = rgb.copy(); out.putalpha(day.getchannel("A"))   # the one outline, whatever the light
+    lit = max(0.0, min(1.0, (-sun_up - 1) / 7))
+    if lit:
+        windows = SKYLINE["windows"]
+        out.paste(windows, (0, 0), windows.getchannel("A").point(lambda a: round(a * lit)))
+    return out
+
+
 def town(img, sun_up, middle):
-    """the rooftops along the bottom, the same every day, with a few windows lit after dark, and the compass under
-    them, middle being the bearing in the middle of the screen"""
-    rng, d = random.Random(76), ImageDraw.Draw(img)
-    d.rectangle((0, HORIZON, SCREEN[0], SCREEN[1]), fill=TOWN)
-    x = 0
-    while x < SCREEN[0]:
-        bw, bh = rng.randrange(30, 110), rng.randrange(6, 34)
-        if rng.random() < 0.25:   # a tree
-            d.ellipse((x, HORIZON - bh - 10, x + bw // 2, HORIZON + 4), fill=TOWN)
-        else:
-            d.rectangle((x, HORIZON - bh, x + bw, HORIZON), fill=TOWN)
-            if rng.random() < 0.3:   # a pitched roof
-                d.polygon([(x, HORIZON - bh), (x + bw // 2, HORIZON - bh - 12), (x + bw, HORIZON - bh)], fill=TOWN)
-            for wy in range(HORIZON - bh + 6, HORIZON - 4, 8):
-                for wx in range(x + 6, x + bw - 6, 10):
-                    if rng.random() < 0.18 and sun_up < -3:
-                        d.rectangle((wx, wy, wx + 3, wy + 3), fill=WINDOW)
-        x += bw + rng.randrange(0, 20)
+    """the skyline standing on the horizon, the ground under it, and the compass on the ground, middle being the
+    bearing in the middle of the screen -> the skyline, RGBA, to draw back over the sun"""
+    ImageDraw.Draw(img).rectangle((0, HORIZON, SCREEN[0], SCREEN[1]), fill=TOWN)
+    skyline = city(sun_up)
+    img.paste(skyline, (0, HORIZON - skyline.height), skyline)
     for bearing, name in ((0, "N"), (45, "NE"), (90, "E"), (135, "SE"), (180, "S"), (225, "SW"), (270, "W"), (315, "NW")):
         x = (bearing - middle + 180) % 360 * PX
         for x in (x, x + SCREEN[0]) if x < 1 else (x,):   # the edges are the same bearing: say it at both
             text(img, (max(8, min(SCREEN[0] - 8 - len(name) * 8, round(x) - len(name) * 4)), HORIZON + 22), name, D, scale=1)
+    return skyline
 
 
 def check():
@@ -484,9 +504,25 @@ def check():
     assert (x < 20 or x > SCREEN[0] - 20) and abs(y - (HORIZON - 39.95 * PX)) < 3 * PX, (x, y)
     assert shade(30) == (SKY[0][1], SKY[0][2]) and shade(-30) == (SKY[-1][1], SKY[-1][2]) and shade(-3) != shade(3)
     assert len(STARMAP["stars"]) > 800 and len(STARMAP["lines"]) == 88 and STARMAP["stars"][0][2] < 0, "Sirius first"
-    sky = lambda when: Page.showing(None).picture(when, None, safe=False).crop((0, 200, SCREEN[0], HORIZON - 60))
-    lit = lambda img: sum(1 for p in img.getdata() if min(p) > 150)
-    assert lit(sky(datetime(2026, 10, 19, 23))) > 200 and lit(sky(datetime(2026, 10, 19, 14))) == 0, "stars at night, none by day"
+    sky = lambda when: Page.showing(None).picture(when, None, safe=False).crop((0, 200, SCREEN[0], HORIZON - 166))   # over the towers
+    bright = lambda img: sum(1 for p in img.getdata() if min(p) > 150)
+    assert bright(sky(datetime(2026, 10, 19, 23))) > 100 and bright(sky(datetime(2026, 10, 19, 14))) == 0, "stars at night, none by day"
+    # the skyline: one outline in every light, its windows lit only after dark, and the sun behind it, not in front
+    outline = SKYLINE["day"].getchannel("A")
+    assert all(ImageChops.difference(city(up).getchannel("A"), outline).getbbox() is None for up in (30, 3, -5, -20))
+    panes = SKYLINE["windows"].getchannel("A")   # where the windows are
+    lit = lambda up: ImageChops.multiply(ImageChops.difference(city(up).convert("RGB"), SKYLINE["windows"].convert("RGB")).convert("L"),
+                                         panes).getbbox() is None   # every window shows its light
+    assert lit(-20) and not lit(30), "the windows are lit after dark, and not by day"
+    page = Page.showing(None)
+    page.picture(datetime(2026, 10, 19, 18, 10), None, safe=False)   # the sun right down on the skyline, setting
+    if page.sunspot:
+        x, y = page.sunspot
+        front = page.city.crop((x, y - (HORIZON - page.city.height), x + 48, y - (HORIZON - page.city.height) + 48))
+        drawn = page.moving(datetime(2026, 10, 19, 18, 10), 0, None)[0][0]
+        mask = front.getchannel("A")
+        assert ImageChops.difference(Image.composite(front.convert("RGB"), drawn, mask), drawn).getbbox() is None, \
+            "where the skyline is, it's in front of the sun"
     Page.check()
     for lat, lon in ((39.95, -75.17), (78.2, 15.6), (-33.9, 151.2), (0, 0), ("91", "400")):   # anywhere, even off the map
         page = Page.showing(Page.SAMPLE, lat=lat, lon=lon, place="somewhere with a long name")
