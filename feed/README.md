@@ -105,10 +105,11 @@ restrict,command="python3 -I /home/kiosk/kiosk/control.py" ssh-ed25519 AAAA… d
 `control.py` checks the page against the playlist and writes `~/.cache/kiosk/control.json`, and `kiosk.py` picks it up
 within a quarter second. A pinned page starts over every time its seconds run out, so the weather still refreshes.
 
-The **Desk Kiosk** tray widget (`plasmoid/`, installed by `install.sh`) runs `kiosk-ctl`, in the kiosk's own look. Click
-it for what's on the kiosk now, a picture of every page in the rotation (the last time each was on screen; the kiosk
+The **Desk Kiosk** widget (`plasmoid/`, installed by `install.sh`) runs `kiosk-ctl`, in the kiosk's own look. It goes on
+a panel as a button of its own (right-click the panel, **Add Widgets**, Desk Kiosk), not in the system tray, because
+the tray squeezes every widget into one small shared popup. Click it for what's on the kiosk now, a picture of every page in the rotation (the last time each was on screen; the kiosk
 keeps them in `~/.cache/kiosk/thumbs/`) to jump to, Auto, Next and Settings (the setup page, in the browser), and the
-transitions to turn on and off. Middle-click skips to the next page. The tray icon turns into a pin while a page is
+transitions to turn on and off. Middle-click skips to the next page. The icon turns into a pin while a page is
 pinned. It only asks the kiosk anything while the popup is open.
 
 Plasma keeps a widget it has loaded, so after `install.sh` updates it, it only shows once plasmashell restarts

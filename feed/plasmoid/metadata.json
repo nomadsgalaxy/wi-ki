@@ -13,11 +13,9 @@
         "Id": "org.wiki.deskkiosk",
         "License": "MIT",
         "Name": "Desk Kiosk",
-        "Version": "2.0"
+        "Version": "2.1"
     },
     "X-Plasma-API": "declarativeappletscript",
     "X-Plasma-API-Minimum-Version": "6.0",
-    "X-Plasma-MainScript": "ui/main.qml",
-    "X-Plasma-NotificationArea": "true",
-    "X-Plasma-NotificationAreaCategory": "Hardware"
+    "X-Plasma-MainScript": "ui/main.qml"
 }
