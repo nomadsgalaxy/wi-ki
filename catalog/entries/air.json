@@ -3,7 +3,9 @@
  "kind": "page",
  "home": "public",
  "about": "the US air quality index, what's in the air and the UV, now and for the next 24 hours",
- "found": {},
+ "found": {
+  "main": "0d70c8"
+ },
  "shapes": [
   "bar"
  ],
