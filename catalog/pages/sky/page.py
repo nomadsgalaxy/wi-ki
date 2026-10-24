@@ -264,7 +264,7 @@ class Page(Simple):
                                "yesterday": (before[1] - before[0]) % 86400 if None not in before else None}
         return self._days[key]
 
-    def where(self, ts, ra, dec):
+    def spot(self, ts, ra, dec):
         """something at ra and dec, on the screen at Unix time ts -> (x, y, its height above the horizon)"""
         up, bearing = sky_place(ts, ra, dec, self.lat, self.lon)
         middle = 0 if self.lat < 0 else 180   # face the way the sun goes: south, or north in the southern hemisphere
@@ -275,7 +275,7 @@ class Page(Simple):
         out = []
         for name in SHADE:
             ra, dec = planet(name, ts)
-            x, y, up = self.where(ts, ra, dec)
+            x, y, up = self.spot(ts, ra, dec)
             if up > 5 and (name != "MERCURY" or up > 10):   # Mercury only shows when it's clear of the glow
                 out.append((name, x, y, up, sky_place(ts, ra, dec, self.lat, self.lon)[1]))
         return sorted(out, key=lambda p: -p[3])
@@ -293,7 +293,7 @@ class Page(Simple):
         clouds = data if isinstance(data, dict) else {}
         ts, day = time.mktime(now.timetuple()), self.day(now.date())
         sun_ra, sun_dec = sun_place(ts)
-        sx, sy, sun_up = self.where(ts, sun_ra, sun_dec)
+        sx, sy, sun_up = self.spot(ts, sun_ra, sun_dec)
         cover = clouds.get(now.strftime("%Y-%m-%dT%H:00"))
         w, h = SCREEN[0], HORIZON - TOP
         # the sky: a blend from its top to the horizon by the sun's height, and a glow round where the sun is low
@@ -325,7 +325,7 @@ class Page(Simple):
             for name, segments in sorted(STARMAP["lines"].items(), key=lambda c: -sum(map(len, c[1]))):
                 points = []
                 for segment in segments:
-                    spots = [self.where(ts, ra, dec) for ra, dec in segment]
+                    spots = [self.spot(ts, ra, dec) for ra, dec in segment]
                     points += spots
                     for (x0, y0, u0), (x1, y1, u1) in zip(spots, spots[1:]):
                         if u0 > 0 and u1 > 0 and abs(x1 - x0) < w / 2:   # both up, and not across the screen's edge
@@ -342,7 +342,7 @@ class Page(Simple):
             for ra, dec, mag, bv in STARMAP["stars"]:
                 if mag > faintest:
                     break   # they're brightest first
-                x, y, up = self.where(ts, ra, dec)
+                x, y, up = self.spot(ts, ra, dec)
                 if up <= 0 or not fit(x, y):
                     continue
                 colour = blend((170, 200, 255) if bv < 0 else (236, 240, 255) if bv < 0.5 else (255, 238, 206) if bv < 1 else (255, 204, 160),
@@ -357,7 +357,7 @@ class Page(Simple):
                 named.append((name, x, y))
         # the moon, in its phase, wherever it is (day or night)
         age, lit, phase = moon(ts)
-        mx, my, moon_up = self.where(ts, *moon_place(ts))
+        mx, my, moon_up = self.spot(ts, *moon_place(ts))
         if moon_up > -1 and fit(mx, my):
             m = disc(age, 40, self.lat < 0)
             img.paste(m, (round(mx) - 20, round(my) - 20), m)
@@ -500,7 +500,7 @@ def check():
     # the panorama: Polaris over the north at the screen's edges, as high as Philadelphia is far north; the sky's colour
     # follows the sun; and the star map is all there
     page = Page(39.95, -75.17)
-    x, y, up = page.where(utc(2026, 10, 19, 1), 37.95, 89.26)
+    x, y, up = page.spot(utc(2026, 10, 19, 1), 37.95, 89.26)
     assert (x < 20 or x > SCREEN[0] - 20) and abs(y - (HORIZON - 39.95 * PX)) < 3 * PX, (x, y)
     assert shade(30) == (SKY[0][1], SKY[0][2]) and shade(-30) == (SKY[-1][1], SKY[-1][2]) and shade(-3) != shade(3)
     assert len(STARMAP["stars"]) > 800 and len(STARMAP["lines"]) == 88 and STARMAP["stars"][0][2] < 0, "Sirius first"
@@ -524,6 +524,15 @@ def check():
         assert ImageChops.difference(Image.composite(front.convert("RGB"), drawn, mask), drawn).getbbox() is None, \
             "where the skyline is, it's in front of the sun"
     Page.check()
+    # as a kiosk runs it: made from the playlist's options, loading its cloud forecast through Simple (with no network
+    # here, the fetch fails and it draws without clouds), not just drawing SAMPLE
+    page = Page(lat=39.704, lon=-75.241)
+    assert page.where().endswith(".json"), "its cache is Simple's"
+    page.fetch = lambda: (_ for _ in ()).throw(OSError("offline"))
+    import contextlib, io
+    with contextlib.redirect_stdout(io.StringIO()):
+        page.fetch_now(os.path.join(__import__("tempfile").mkdtemp(), "sky.json"))
+        assert page.background(datetime(2026, 10, 19, 21))[1].size == SCREEN and isinstance(page.problem, OSError)
     for lat, lon in ((39.95, -75.17), (78.2, 15.6), (-33.9, 151.2), (0, 0), ("91", "400")):   # anywhere, even off the map
         page = Page.showing(Page.SAMPLE, lat=lat, lon=lon, place="somewhere with a long name")
         for now in (datetime(2026, 6, 21, 12), datetime(2026, 12, 21, 23, 59), datetime(2026, 3, 8, 2, 30), datetime(2026, 10, 19, 22)):
