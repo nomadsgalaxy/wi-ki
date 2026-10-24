@@ -1,0 +1,32 @@
+{
+ "name": "swanson",
+ "kind": "transition",
+ "home": "public",
+ "about": "planks drop in with pixel-art Ron Swanson and one of his quotes burnt into the wood, then a saw cuts them away",
+ "found": {},
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "ron-swanson-quotes.herokuapp.com"
+  ],
+  "secrets": []
+ },
+ "settings": {},
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "none: Ron and the wood are drawn in code. The quotes come from the Ron Swanson Quotes API. Ron Swanson is Parks and Recreation's (NBC), played by Nick Offerman: an unofficial fan tribute, for our own kiosks",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}
