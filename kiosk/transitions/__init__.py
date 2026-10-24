@@ -11,8 +11,8 @@ canvas.py):
   matrix         a curtain of green code rain falls and leaves the new page behind it
   hackerman      a neon terminal hacks time while the new page glitches in
   johnny5        Johnny-5 rolls in, needs input, and scans the new page in with his eyes
-  pacman         Pac-Man chomps the dots along three lanes, and the new page is there wherever he's been
-  tetris         blocks hard-drop and lock in, and each line that fills clears to the new page, bottom up
+  pacman         a maze builds over the old page, and Pac-Man eats his way through it to the new one
+  tetris         the stack fills the screen, then an I piece scores a Tetris and clears it to the new page
 
 kiosk.py calls play() whenever the page changes. The themes take turns, in ORDER, leaving out any listed in
 ~/.config/kiosk/transitions-off.json (deploy/kiosk-config sets it). A kiosk has the ones it's installed (packs.py):

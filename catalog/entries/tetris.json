@@ -2,7 +2,7 @@
  "name": "tetris",
  "kind": "transition",
  "home": "public",
- "about": "blocks hard-drop and lock into place, and each line that fills clears to the new page, bottom up",
+ "about": "the stack fills the screen fast, then an I piece drops in the well: TETRIS! and it all clears to the new page",
  "found": {
   "main": "c5cb72"
  },

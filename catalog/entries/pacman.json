@@ -2,7 +2,7 @@
  "name": "pacman",
  "kind": "transition",
  "home": "public",
- "about": "Pac-Man chomps the dots along three lanes, and the new page is there wherever he's been",
+ "about": "a maze builds over the old page, and Pac-Man eats his way through it to the new one",
  "found": {
   "main": "7667c2"
  },
