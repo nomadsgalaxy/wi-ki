@@ -13,7 +13,7 @@ canvas.py):
   johnny5        Johnny-5 rolls in, needs input, and scans the new page in with his eyes
   pacman         a maze builds over the old page, and Pac-Man eats his way through it to the new one
   tetris         the stack fills the screen, then an I piece scores a Tetris and clears it to the new page
-  swanson        oak planks drop in, Ron Swanson slides up, his quote burns in beside him, and a saw cuts it away
+  swanson        oak planks fall in, Ron Swanson rises beside his quote on a card, then he sinks and the planks fall away
 
 kiosk.py calls play() whenever the page changes. The themes take turns, in ORDER, leaving out any listed in
 ~/.config/kiosk/transitions-off.json (deploy/kiosk-config sets it). A kiosk has the ones it's installed (packs.py):

@@ -1,8 +1,8 @@
 """Swanson: oak planks fall into place over the old page, one after another from the top. Once they're all seated, Ron
-Swanson slides up from below on the right, in Nula's pixel art, looking left with his mallet, and one of his quotes burns into the wood beside him, line by line, signed. It
-holds there long enough to read while he blinks at you, then a saw blade runs along each plank's seam and the planks
-come away, top to bottom, onto the new page. A fan tribute to Nick Offerman's Ron Swanson in Parks and Recreation;
-nothing official.
+Swanson slides up from below on the right, in Nula's pixel art, looking left with his mallet, and one of his quotes
+appears beside him on a paper card pinned to the oak, line by line, signed. It holds there long enough to read, then
+Ron sinks back down out of sight and the planks fall away below, the bottom one first, onto the new page. A fan
+tribute to Nick Offerman's Ron Swanson in Parks and Recreation; nothing official.
 
 The quote comes from the Ron Swanson Quotes API (no key). A transition can't wait on the internet, so it shows a quote
 fetched earlier and kept in ~/.cache/kiosk/swanson.json, and fetches the next one in the background as it plays, at
@@ -26,7 +26,8 @@ STILL = 2.8                                  # seconds it holds still, to be rea
 PLANKS = 5
 PLANK = -(-HEIGHT // PLANKS)                 # 103 rows
 DROP, FALL = 0.016, 0.072                    # a plank starts falling this long after the one above, and takes this long
-IN, UP, BURNT_IN, OUT = 0.136, 0.22, 0.27, 0.84  # the planks are in, Ron is up, the quote is burnt in, the saw starts
+IN, UP, BURNT_IN, OUT = 0.136, 0.22, 0.27, 0.84  # the planks are in, Ron is up, the quote is in, he starts to go
+GONE = 0.90                                  # he's gone, and the planks start falling away, the bottom one first
 QUOTE = (80, 70, 1340, 430)                  # where the quote and its signature go: left of Ron, clear of him
 API = "https://ron-swanson-quotes.herokuapp.com/v2/quotes/5"   # five at a time, so there are short ones to choose from
 SHORT = 110                                  # characters: a quote this long can be read in the hold
@@ -35,7 +36,8 @@ CACHE = os.path.expanduser("~/.cache/kiosk/swanson.json")
 KEEP, EVERY = 30, 300                        # quotes kept for when it's offline, and seconds between fetches
 WOOD = ((150, 96, 52), (139, 88, 47), (160, 104, 58), (146, 92, 50), (133, 84, 44))   # a plank each
 GRAIN, BURNT, CHAR = (112, 70, 36), (52, 28, 12), (196, 140, 88)
-STEEL, TEETH = (200, 206, 214), (120, 126, 134)
+PAPER, INKED, SHADOW = (240, 230, 206), (36, 22, 12), (70, 40, 18)   # the card the quote's on, its ink, its shadow
+STEEL = (200, 206, 214)
 SKIN, SHADE, HAIR, HAIR_LIT, STACHE, STACHE_DARK, INK, LIP = (226, 172, 132), (194, 138, 104), (74, 46, 28), (104, 68, 40), (92, 58, 34), (64, 38, 22), (34, 22, 16), (150, 90, 74)
 RED, DARK, LIGHT = (168, 36, 36), (52, 18, 18), (206, 84, 70)
 RON, EDGE = 8, 40                            # about 480 tall, 40 px in from the right: Nula's art sits at (1400, 35)
@@ -157,38 +159,40 @@ def wood():
 
 
 def scene(quote):
-    """the whole of it, laid out before it plays -> {"wood": the oak alone, "full": with Ron and the quote, both packed
-    bytes; "lines": each line of the quote's box (x, y, w, h), the signature last}"""
+    """the whole of it, laid out before it plays -> {"wood": the oak alone, "quoted": the oak with the quote on its card,
+    "full": that and Ron, all packed bytes; "bands": the card in bands from the top, a line of the quote in each and
+    the signature in the last, as (x, y, w, h)}"""
     img = wood()
     plain = kit.rgb565(img)
-    him = PORTRAIT[0]
-    img.paste(him, (RON_AT, HEIGHT - him.height), him)
     left, top, right, bottom = QUOTE[0], QUOTE[1], min(QUOTE[2], RON_AT - 60), QUOTE[3]
+    pad = 36                                 # the card's margin round the words
     words = tidy(quote) if quote else "NO QUOTE YET. IT'LL BE HERE ONCE THE KIOSK'S BEEN ONLINE."
     for scale in (4, 3, 2):                  # as big as it fits, with room under it for the signature
-        lines = wrap(words, (right - left) // (8 * scale))
-        if len(lines) * 20 * scale <= bottom - top - 48:
+        lines = wrap(words, (right - left - 2 * pad) // (8 * scale))
+        if len(lines) * 20 * scale <= bottom - top - 2 * pad - 44:
             break
-    y, boxes = top + (bottom - top - 48 - len(lines) * 20 * scale) // 2, []
-    for line in lines:                       # burnt in: dark letters, a lighter scorch under them
-        x = left + (right - left - len(line) * 8 * scale) // 2
-        kit.text(img, (x + 2, y + 2), line, CHAR, scale=scale)
-        kit.text(img, (x, y), line, BURNT, scale=scale)
-        boxes.append((x, y, len(line) * 8 * scale + 2, 16 * scale + 2)); y += 20 * scale
-    w = kit.text(img, (right, bottom - 32), "- RON SWANSON", BURNT, scale=2, right=True)
-    boxes.append((right - w, bottom - 32, w, 32))
-    return {"wood": plain, "full": kit.rgb565(img), "lines": boxes}
+    tall = len(lines) * 20 * scale + 44      # the words and the signature under them
+    wide = max(len(line) for line in lines) * 8 * scale
+    card = ((left + right - wide) // 2 - pad, top + (bottom - top - tall) // 2 - pad)
+    card += (card[0] + wide + 2 * pad, card[1] + tall + 2 * pad)
+    d = ImageDraw.Draw(img)
+    d.rectangle((card[0] + 8, card[1] + 8, card[2] + 8, card[3] + 8), fill=SHADOW)   # its shadow on the oak
+    d.rectangle(card, fill=PAPER, outline=BURNT, width=4)
+    for x in (card[0] + 16, card[2] - 26):   # pinned up
+        d.rectangle((x, card[1] + 12, x + 9, card[1] + 21), fill=STEEL, outline=GRAIN)
+    y, bands, last = card[1] + pad, [], card[1]
+    for line in lines:
+        kit.text(img, ((left + right - len(line) * 8 * scale) // 2, y), line, INKED, scale=scale)
+        y += 20 * scale
+        bands.append((card[0], last, card[2] - card[0] + 9, y - last)); last = y
+    kit.text(img, (card[2] - pad, y + 8), "- RON SWANSON", BURNT, scale=2, right=True)
+    bands.append((card[0], last, card[2] - card[0] + 9, card[3] + 9 - last))
+    quoted = kit.rgb565(img)
+    him = PORTRAIT[0]
+    img.paste(him, (RON_AT, HEIGHT - him.height), him)
+    return {"wood": plain, "quoted": quoted, "full": kit.rgb565(img), "bands": bands}
 
 
-def blade():
-    """a circular saw blade, as a sprite: steel with teeth round it and a hole in the middle"""
-    img = Image.new("RGBA", (40, 40)); d = ImageDraw.Draw(img)
-    d.ellipse((2, 2, 37, 37), fill=TEETH + (255,)); d.ellipse((6, 6, 33, 33), fill=STEEL + (255,))
-    d.ellipse((16, 16, 23, 23), fill=(0, 0, 0, 0))
-    return sprite(img, 2)
-
-
-BLADE = blade()
 PORTRAIT = portrait()
 RON_AT = WIDTH - EDGE - PORTRAIT[0].width   # his left edge, on the right of the screen
 RISING = sprite(PORTRAIT[0])
@@ -230,7 +234,7 @@ def frames(c, count):
     shown = ready["scene"] or scene(ready["quote"] or pick(quotes()))   # chosen now, and kept for the whole play
     ready["scene"] = None                    # this one's used: lay out the next while this plays
     threading.Thread(target=refresh, daemon=True).start()
-    down, gone, burnt, up = 0, 0, 0, False
+    down, burnt, up, loose = 0, 0, False, set()
     him = PORTRAIT[0]
     for k in range(count):
         t = k / max(1, count - 1)            # a lone frame is the first; play() lands on the new page
@@ -244,20 +248,28 @@ def frames(c, count):
         if IN <= t < UP:                     # Ron slides up from below on the right, slowing as he arrives
             k_ = (t - IN) / (UP - IN)
             c.draw(RISING, RON_AT, HEIGHT - round(him.height * (1 - (1 - k_) ** 2)))
-        elif t >= UP and not up:             # and he's there, part of the wood now
+        elif UP <= t < OUT and not up:       # and he's there, part of the wood now (once: he leaves at OUT)
             c.reveal(RON_AT, HEIGHT - him.height, him.width, him.height, src=shown["full"]); up = True
-        lines = shown["lines"]
-        while UP <= t and burnt < len(lines) and t >= UP + (BURNT_IN - UP) * (burnt + 1) / len(lines):
-            c.reveal(*lines[burnt], src=shown["full"]); burnt += 1   # the quote burns in, line by line
+        bands = shown["bands"]
+        while UP <= t and burnt < len(bands) and t >= UP + (BURNT_IN - UP) * (burnt + 1) / len(bands):
+            c.reveal(*bands[burnt], src=shown["full"]); burnt += 1   # the card unrolls, a line of the quote at a time
         if SHUT and BURNT_IN <= t < OUT and (t - BURNT_IN) % 0.25 < 0.025:   # a blink now and then, while it's read
             c.draw(SHUT, RON_AT + SHUT_AT[0], HEIGHT - him.height + SHUT_AT[1])
-        if t >= OUT:                         # the saw runs along each seam, and that plank comes away
-            span = (1 - OUT) / PLANKS
-            while gone < PLANKS and t >= OUT + span * (gone + 1):
-                c.reveal(0, gone * PLANK, WIDTH, PLANK); gone += 1
-            if gone < PLANKS:
-                along = (t - OUT - span * gone) / span
-                c.draw(BLADE, round(-80 + along * (WIDTH + 80)), min(HEIGHT, (gone + 1) * PLANK) - 40)
+        if OUT <= t < GONE:                  # he sinks back down out of sight, faster as he goes
+            if up:
+                c.reveal(RON_AT, HEIGHT - him.height, him.width, him.height, src=shown["quoted"]); up = False
+            c.draw(RISING, RON_AT, HEIGHT - him.height + round(him.height * ((t - OUT) / (GONE - OUT)) ** 2))
+        elif t >= GONE:                      # then the planks fall away below, bottom first, faster as they go
+            if up:                           # (a short run where he never sank)
+                c.reveal(RON_AT, HEIGHT - him.height, him.width, him.height, src=shown["quoted"]); up = False
+            for p in reversed(range(PLANKS)):
+                start = GONE + (PLANKS - 1 - p) * 0.012
+                if t < start:
+                    continue
+                if p not in loose:           # off its nails: the new page is behind it from now on
+                    c.reveal(0, p * PLANK, WIDTH, PLANK); loose.add(p)
+                fall = (HEIGHT - p * PLANK) * ((t - start) / max(1e-6, 1 - start)) ** 2
+                c.rows(p * PLANK + round(fall), shown["quoted"][p * PLANK * WIDTH * 2:(p + 1) * PLANK * WIDTH * 2])
         yield
 
 
@@ -287,5 +299,6 @@ def check():
     for quote in (None, "x" * 240, "Ωμέγα " * 40, "short"):   # nothing yet, the longest, other scripts, a few words
         laid = scene(quote)
         assert len(laid["full"]) == len(laid["wood"]) == WIDTH * HEIGHT * 2
-        assert all(QUOTE[0] <= x and x + w <= min(QUOTE[2] + 2, RON_AT) and QUOTE[1] <= y and y + h <= QUOTE[3] + 2
-                   for x, y, w, h in laid["lines"]), "the quote stays in its place, left of him"
+        assert all(QUOTE[0] <= x and x + w <= min(QUOTE[2] + 9, RON_AT) and QUOTE[1] <= y and y + h <= QUOTE[3] + 9
+                   for x, y, w, h in laid["bands"]), "the card, shadow and all, stays in its place, left of him"
+        assert len(laid["quoted"]) == WIDTH * HEIGHT * 2
