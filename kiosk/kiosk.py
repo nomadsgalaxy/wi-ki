@@ -51,6 +51,7 @@ FPS = 4
 _suffix = "" if kit.SHAPE == "bar" else f"-{kit.SHAPE}"
 CONTROL = os.path.expanduser(f"~/.cache/kiosk/control{_suffix}.json")
 SHOWING = os.path.expanduser(f"~/.cache/kiosk/showing{_suffix}")
+THUMBS = os.path.expanduser("~/.cache/kiosk/thumbs")   # a small picture of each page, for the desktop widget
 # a touch, {"x": .., "y": ..} in screen pixels, or a gesture, {"gesture": "menu" | "next" | "prev"} (a two-finger double
 # tap, a swipe left, a swipe right): whatever reads the touch panel writes it (or kiosk-ctl touch, to try one)
 TOUCH = os.path.expanduser(f"~/.cache/kiosk/touch{_suffix}.json")
@@ -315,6 +316,7 @@ def main(screen, until=None):
                         for img, xy in regions:
                             full.paste(rows(img) if isinstance(img, bytes) else img, xy)
                         frame = full.tobytes()
+                        snap(page.name, full)
                         if not isinstance(screen, remote.Server):   # a render server draws fast enough without it
                             last[page.name] = frame
                         if moving:
@@ -338,6 +340,28 @@ def main(screen, until=None):
             WAKE.clear()
     finally:
         getattr(screen, "close", lambda: None)()
+
+
+_snapped = {}
+
+
+def snap(name, frame, every=30, folder=THUMBS):
+    """keep a small picture of a page as it's drawn, for the desktop widget (control.py thumbs): at most every `every`
+    seconds a page, the bar's only, in a thread so a frame never waits on it. frame is the page, packed"""
+    if kit.SHAPE != "bar" or not name.replace("_", "").replace("-", "").isalnum() or time.time() - _snapped.get(name, 0) < every:
+        return None
+    _snapped[name] = time.time()
+    def save():
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, f"{name}.jpg")
+            kit.unpack(frame).resize((kit.SCREEN[0] // 4, kit.SCREEN[1] // 4), Image.BILINEAR).save(path + ".tmp", "JPEG", quality=80)
+            os.replace(path + ".tmp", path)
+        except Exception as e:   # a picture's only nice to have
+            print(f"snap: {name}: {e}", file=sys.stderr)
+    worker = threading.Thread(target=save, daemon=True)
+    worker.start()
+    return worker
 
 
 def back(where, every=60):
@@ -373,6 +397,20 @@ def display():
         screen.close()
 
 
+def check_snap():
+    """the widget's pictures: a quarter of the screen, a JPEG, not again within `every`, and never for an odd name"""
+    import tempfile
+    folder, frame = tempfile.mkdtemp(), kit.packed(Image.new("RGB", kit.SCREEN, kit.O))
+    _snapped.clear()
+    snap("weather", frame, folder=folder).join()
+    img = Image.open(os.path.join(folder, "weather.jpg"))
+    assert img.format == "JPEG" and img.size == (kit.SCREEN[0] // 4, kit.SCREEN[1] // 4)
+    assert snap("weather", frame, folder=folder) is None, "not again so soon"
+    assert snap("../evil", frame, folder=folder) is None and snap("a b", frame, folder=folder) is None
+    _snapped.clear()
+    print("snap: ok")
+
+
 def check():
     """every page package's self-test, the event sync's, then the playlist itself"""
     import pages
@@ -383,6 +421,7 @@ def check():
         print(f"{name}: ok")
     importlib.import_module("eventsync").check()
     importlib.import_module("control").check()
+    check_snap()
     touchpanel.check()
     for name in ("config", "form", "fuzz", "link", "look", "packs", "admin", "setup_check"):   # the setup page and the rules it has to keep
         importlib.import_module(name).check()

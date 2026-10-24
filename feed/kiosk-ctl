@@ -1,6 +1,14 @@
 #!/bin/sh
 # kiosk-ctl: pick what the desk kiosk shows, from my desktop.
-#   kiosk-ctl status | show <page> | auto | next
-# The Pi runs kiosk/control.py for this key and nothing else, so the arguments are all it gets.
-exec ssh -T -i ~/.ssh/desk-kiosk-control -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
-  "${KIOSK_HOST:-kiosk@kiosk.local}" "${@:-status}"
+#   kiosk-ctl status | show <page> | auto | next | thumbs | transitions | transition <name> on|off
+#   kiosk-ctl setup     the kiosk's setup page's address (asks nothing: it's for the widget's Settings button)
+# The kiosk (or its render server) runs kiosk/control.py for this key and nothing else, so the arguments are all it
+# gets. Where to: ~/.config/kiosk-ctl (install.sh writes it) has host=, where the pages are drawn, and setup=, the
+# Pi's setup page; KIOSK_HOST and KIOSK_SETUP override them.
+[ -r ~/.config/kiosk-ctl ] && . ~/.config/kiosk-ctl
+host=${KIOSK_HOST:-${host:-kiosk@kiosk.local}}
+if [ "${1:-}" = setup ]; then
+  echo "${KIOSK_SETUP:-${setup:-https://${host#*@}}}"
+  exit 0
+fi
+exec ssh -T -i ~/.ssh/desk-kiosk-control -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "$host" "${@:-status}"
