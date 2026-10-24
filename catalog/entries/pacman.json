@@ -3,7 +3,9 @@
  "kind": "transition",
  "home": "public",
  "about": "Pac-Man chomps the dots along three lanes, and the new page is there wherever he's been",
- "found": {},
+ "found": {
+  "main": "7667c2"
+ },
  "shapes": [
   "bar"
  ],

@@ -3,7 +3,9 @@
  "kind": "transition",
  "home": "public",
  "about": "blocks hard-drop and lock into place, and each line that fills clears to the new page, bottom up",
- "found": {},
+ "found": {
+  "main": "c5cb72"
+ },
  "shapes": [
   "bar"
  ],
