@@ -3,7 +3,9 @@
  "kind": "transition",
  "home": "public",
  "about": "a small xkcd comic between pages: the screen goes dark with its alt text, the comic prints in, then the new page comes down over it",
- "found": {},
+ "found": {
+  "main": "c155c5"
+ },
  "shapes": [
   "bar"
  ],
