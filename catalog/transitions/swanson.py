@@ -1,16 +1,19 @@
-"""Swanson: planks of wood drop in over the old page, one after another, with Ron Swanson on them in pixel art and one
-of his quotes burnt into the wood beside him, signed. It holds there long enough to read while he blinks at you, then
-a saw blade runs along each plank's seam and the planks come away, top to bottom, onto the new page. A fan tribute to
-Nick Offerman's Ron Swanson in Parks and Recreation; nothing official.
+"""Swanson: oak planks drop into place over the old page, one after another. Ron Swanson slides up from below on the
+right, in pixel art, looking left, and one of his quotes burns into the wood beside him, line by line, signed. It
+holds there long enough to read while he blinks at you, then a saw blade runs along each plank's seam and the planks
+come away, top to bottom, onto the new page. A fan tribute to Nick Offerman's Ron Swanson in Parks and Recreation;
+nothing official.
 
 The quote comes from the Ron Swanson Quotes API (no key). A transition can't wait on the internet, so it shows a quote
 fetched earlier and kept in ~/.cache/kiosk/swanson.json, and fetches the next one in the background as it plays, at
 most every few minutes, five at a time. It shows the newest one short enough to read in the hold, chosen and laid out
 before it starts and kept for the whole play. Until the first one arrives it says so on the wood. The planks with the
-quote on them are drawn in that background thread too, so playing it is all whole-row copies.
+quote on them are drawn in that background thread too, so playing it is mostly whole-row copies.
 
-Ron is drawn in code, unless there's a drawn one in kiosk/art/swanson.png (and swanson-blink.png, his eyes shut): the
-art is only him, never the wood or the quote, and only what differs between the two blinks.
+The art is in pieces, so any of it can be drawn properly and dropped in: kiosk/art/swanson.png is Ron (transparent
+round him, looking left, shoulders on his picture's bottom edge) and swanson-blink.png the same with his eyes shut, and
+kiosk/art/swanson-wood.png the oak, the whole screen of it. Without them, they're drawn here in code. The quote is
+always drawn live, never part of the art.
 """
 import json, os, random, re, threading, time, urllib.request
 from PIL import Image, ImageChops, ImageDraw
@@ -19,10 +22,10 @@ import kit
 from .canvas import WIDTH, HEIGHT, sprite
 
 SECONDS = 5
-STILL = 3.4                                  # seconds it holds still, to be read
+STILL = 2.8                                  # seconds it holds still, to be read
 PLANKS = 5
 PLANK = -(-HEIGHT // PLANKS)                 # 103 rows
-IN, OUT = 0.08, 0.76                         # the planks are all in by here, and start coming away here
+IN, UP, BURNT_IN, OUT = 0.08, 0.18, 0.23, 0.80   # the planks are in, Ron is up, the quote is burnt in, the saw starts
 API = "https://ron-swanson-quotes.herokuapp.com/v2/quotes/5"   # five at a time, so there are short ones to choose from
 SHORT = 110                                  # characters: a quote this long can be read in the hold
 UA = {"User-Agent": "wi-ki swanson (github.com/nomadsgalaxy/wi-ki)"}
@@ -33,9 +36,9 @@ GRAIN, BURNT, CHAR = (112, 70, 36), (52, 28, 12), (196, 140, 88)
 STEEL, TEETH = (200, 206, 214), (120, 126, 134)
 SKIN, SHADE, HAIR, HAIR_LIT, STACHE, STACHE_DARK, INK, LIP = (226, 172, 132), (194, 138, 104), (74, 46, 28), (104, 68, 40), (92, 58, 34), (64, 38, 22), (34, 22, 16), (150, 90, 74)
 RED, DARK, LIGHT = (168, 36, 36), (52, 18, 18), (206, 84, 70)
-RON, RON_X = 8, 40                           # he's drawn 8 times his art's size, on the left, shoulders on the bottom
-TEXT_X = RON_X + 48 * RON + 40               # the quote goes right of him
+RON, EDGE = 8, 40                            # he's drawn 8 times his art's size, this far in from the right
 ART = os.path.join(kit.HERE, "art", "swanson.png")   # a drawn Ron, if there is one (and swanson-blink.png, his eyes shut)
+OAK = os.path.join(kit.HERE, "art", "swanson-wood.png")   # drawn oak for the whole screen, if there is one
 
 
 def ron(blink=False):
@@ -94,8 +97,9 @@ def tidy(quote):
 
 
 def wrap(words, width):
+    """words in lines of at most width characters; a word longer than that is broken across lines"""
     lines = [""]
-    for word in words.split():
+    for word in (w[i:i + width] for w in words.split() for i in range(0, len(w), width)):
         if lines[-1] and len(lines[-1]) + 1 + len(word) > width:
             lines.append("")
         lines[-1] = (lines[-1] + " " + word).strip()
@@ -113,7 +117,7 @@ def portrait():
         blink = ART.replace(".png", "-blink.png")
         shut = Image.open(blink).convert("RGBA") if os.path.exists(blink) else art
         return art.resize(size, Image.NEAREST), shut.resize(size, Image.NEAREST)
-    return tuple(ron(blink).resize((48 * RON, 60 * RON), Image.NEAREST) for blink in (False, True))
+    return tuple(ron(blink).resize((48 * RON, 60 * RON), Image.NEAREST).transpose(Image.FLIP_LEFT_RIGHT) for blink in (False, True))
 
 
 def blinking(open_, shut):
@@ -128,9 +132,12 @@ def pick(kept):
     return next((q for q in kept if len(q) <= SHORT), min(kept, key=len) if kept else None)
 
 
-def planks(quote):
-    """the planks with quote burnt in, the whole screen of them -> packed bytes"""
-    rng = random.Random(quote)
+def wood():
+    """the oak, the whole screen of it, RGB: drawn art if there is some, or planks drawn here"""
+    if os.path.exists(OAK):
+        art = Image.open(OAK).convert("RGB")
+        return art if art.size == (WIDTH, HEIGHT) else art.resize((WIDTH, HEIGHT))
+    rng = random.Random(5)
     img = Image.new("RGB", (WIDTH, HEIGHT)); d = ImageDraw.Draw(img)
     for p in range(PLANKS):
         top = p * PLANK
@@ -144,21 +151,31 @@ def planks(quote):
         d.rectangle((0, top + PLANK - 3, WIDTH, top + PLANK - 1), fill=BURNT)   # the seam
         for x in (40, WIDTH - 52):           # nails
             d.rectangle((x, top + PLANK // 2 - 6, x + 11, top + PLANK // 2 + 5), fill=STEEL)
+    return img
+
+
+def scene(quote):
+    """the whole of it, laid out before it plays -> {"wood": the oak alone, "full": with Ron and the quote, both packed
+    bytes; "lines": each line of the quote's box (x, y, w, h), the signature last}"""
+    img = wood()
+    plain = kit.rgb565(img)
     him = PORTRAIT[0]
-    img.paste(him, (RON_X, HEIGHT - him.height), him)
+    img.paste(him, (RON_AT, HEIGHT - him.height), him)
+    right = RON_AT - 60                      # the quote goes left of him
     words = tidy(quote) if quote else "NO QUOTE YET. IT'LL BE HERE ONCE THE KIOSK'S BEEN ONLINE."
     for scale in (4, 3, 2):                  # as big as it fits
-        lines = wrap(words, (WIDTH - TEXT_X - 60) // (8 * scale))
+        lines = wrap(words, (right - 60) // (8 * scale))
         if len(lines) * 20 * scale <= HEIGHT - 150:
             break
-    y = (HEIGHT - 60 - len(lines) * 20 * scale) // 2
+    y, boxes = (HEIGHT - 60 - len(lines) * 20 * scale) // 2, []
     for line in lines:                       # burnt in: dark letters, a lighter scorch under them
-        x = TEXT_X + (WIDTH - TEXT_X - 60 - len(line) * 8 * scale) // 2
+        x = 60 + (right - 60 - len(line) * 8 * scale) // 2
         kit.text(img, (x + 2, y + 2), line, CHAR, scale=scale)
         kit.text(img, (x, y), line, BURNT, scale=scale)
-        y += 20 * scale
-    kit.text(img, (WIDTH - 120, HEIGHT - 70), "- RON SWANSON", BURNT, scale=2, right=True)
-    return kit.rgb565(img)
+        boxes.append((x, y, len(line) * 8 * scale + 2, 16 * scale + 2)); y += 20 * scale
+    w = kit.text(img, (right, HEIGHT - 70), "- RON SWANSON", BURNT, scale=2, right=True)
+    boxes.append((right - w, HEIGHT - 70, w, 32))
+    return {"wood": plain, "full": kit.rgb565(img), "lines": boxes}
 
 
 def blade():
@@ -171,8 +188,10 @@ def blade():
 
 BLADE = blade()
 PORTRAIT = portrait()
+RON_AT = WIDTH - EDGE - PORTRAIT[0].width   # his left edge, on the right of the screen
+RISING = sprite(PORTRAIT[0])
 SHUT, SHUT_AT = blinking(*PORTRAIT)
-ready = {"quote": None, "bytes": None}       # the next planks, drawn ahead in the background
+ready = {"quote": None, "scene": None}       # the next scene, laid out ahead in the background
 _busy = threading.Lock()
 
 
@@ -200,22 +219,31 @@ def refresh():
             except Exception:
                 pass                         # offline, or the API's away: the kept ones do
         quote = pick(kept)
-        ready["quote"], ready["bytes"] = quote, planks(quote)
+        ready["quote"], ready["scene"] = quote, scene(quote)
     finally:
         _busy.release()
 
 
 def frames(c, count):
-    backdrop = ready["bytes"] or planks(ready["quote"] or pick(quotes()))   # chosen now, and kept for the whole play
-    ready["bytes"] = None                    # this one's used: draw the next while this plays
+    shown = ready["scene"] or scene(ready["quote"] or pick(quotes()))   # chosen now, and kept for the whole play
+    ready["scene"] = None                    # this one's used: lay out the next while this plays
     threading.Thread(target=refresh, daemon=True).start()
-    down, gone = 0, 0
+    down, gone, burnt, up = 0, 0, 0, False
+    him = PORTRAIT[0]
     for k in range(count):
         t = k / max(1, count - 1)            # a lone frame is the first; play() lands on the new page
-        while down < PLANKS and t >= IN * (down + 1) / PLANKS:   # the planks drop in, top to bottom
-            c.reveal(0, down * PLANK, WIDTH, PLANK, src=backdrop); down += 1
-        if SHUT and IN <= t < OUT and (t - IN) % 0.25 < 0.025:   # a blink now and then, while it's being read
-            c.draw(SHUT, RON_X + SHUT_AT[0], HEIGHT - PORTRAIT[0].height + SHUT_AT[1])
+        while down < PLANKS and t >= IN * (down + 1) / PLANKS:   # the oak drops in, plank by plank, top to bottom
+            c.reveal(0, down * PLANK, WIDTH, PLANK, src=shown["wood"]); down += 1
+        if IN <= t < UP:                     # Ron slides up from below on the right, slowing as he arrives
+            k_ = (t - IN) / (UP - IN)
+            c.draw(RISING, RON_AT, HEIGHT - round(him.height * (1 - (1 - k_) ** 2)))
+        elif t >= UP and not up:             # and he's there, part of the wood now
+            c.reveal(RON_AT, HEIGHT - him.height, him.width, him.height, src=shown["full"]); up = True
+        lines = shown["lines"]
+        while UP <= t and burnt < len(lines) and t >= UP + (BURNT_IN - UP) * (burnt + 1) / len(lines):
+            c.reveal(*lines[burnt], src=shown["full"]); burnt += 1   # the quote burns in, line by line
+        if SHUT and BURNT_IN <= t < OUT and (t - BURNT_IN) % 0.25 < 0.025:   # a blink now and then, while it's read
+            c.draw(SHUT, RON_AT + SHUT_AT[0], HEIGHT - him.height + SHUT_AT[1])
         if t >= OUT:                         # the saw runs along each seam, and that plank comes away
             span = (1 - OUT) / PLANKS
             while gone < PLANKS and t >= OUT + span * (gone + 1):
@@ -250,4 +278,6 @@ def check():
     ART = real_art
     assert blinking(PORTRAIT[0], PORTRAIT[0]) == (None, None), "no blink picture, no blink"
     for quote in (None, "x" * 240, "Ωμέγα " * 40, "short"):   # nothing yet, the longest, other scripts, a few words
-        assert len(planks(quote)) == WIDTH * HEIGHT * 2
+        laid = scene(quote)
+        assert len(laid["full"]) == len(laid["wood"]) == WIDTH * HEIGHT * 2
+        assert all(0 <= x and x + w <= RON_AT and 0 <= y and y + h <= HEIGHT for x, y, w, h in laid["lines"]), "the quote stays left of him"
