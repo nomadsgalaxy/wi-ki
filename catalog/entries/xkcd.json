@@ -3,7 +3,9 @@
  "kind": "page",
  "home": "public",
  "about": "the latest xkcd comic (or a random one), as big as it fits, with its alt text beside it",
- "found": {},
+ "found": {
+  "main": "8fa710"
+ },
  "shapes": [
   "bar"
  ],
