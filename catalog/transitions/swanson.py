@@ -1,5 +1,5 @@
-"""Swanson: oak planks drop into place over the old page, one after another. Ron Swanson slides up from below on the
-right, in pixel art, looking left, and one of his quotes burns into the wood beside him, line by line, signed. It
+"""Swanson: oak planks fall into place over the old page, one after another from the top. Once they're all seated, Ron
+Swanson slides up from below on the right, in Nula's pixel art, looking left with his mallet, and one of his quotes burns into the wood beside him, line by line, signed. It
 holds there long enough to read while he blinks at you, then a saw blade runs along each plank's seam and the planks
 come away, top to bottom, onto the new page. A fan tribute to Nick Offerman's Ron Swanson in Parks and Recreation;
 nothing official.
@@ -25,7 +25,9 @@ SECONDS = 5
 STILL = 2.8                                  # seconds it holds still, to be read
 PLANKS = 5
 PLANK = -(-HEIGHT // PLANKS)                 # 103 rows
-IN, UP, BURNT_IN, OUT = 0.08, 0.18, 0.23, 0.80   # the planks are in, Ron is up, the quote is burnt in, the saw starts
+DROP, FALL = 0.016, 0.072                    # a plank starts falling this long after the one above, and takes this long
+IN, UP, BURNT_IN, OUT = 0.136, 0.22, 0.27, 0.84  # the planks are in, Ron is up, the quote is burnt in, the saw starts
+QUOTE = (80, 70, 1340, 430)                  # where the quote and its signature go: left of Ron, clear of him
 API = "https://ron-swanson-quotes.herokuapp.com/v2/quotes/5"   # five at a time, so there are short ones to choose from
 SHORT = 110                                  # characters: a quote this long can be read in the hold
 UA = {"User-Agent": "wi-ki swanson (github.com/nomadsgalaxy/wi-ki)"}
@@ -36,7 +38,7 @@ GRAIN, BURNT, CHAR = (112, 70, 36), (52, 28, 12), (196, 140, 88)
 STEEL, TEETH = (200, 206, 214), (120, 126, 134)
 SKIN, SHADE, HAIR, HAIR_LIT, STACHE, STACHE_DARK, INK, LIP = (226, 172, 132), (194, 138, 104), (74, 46, 28), (104, 68, 40), (92, 58, 34), (64, 38, 22), (34, 22, 16), (150, 90, 74)
 RED, DARK, LIGHT = (168, 36, 36), (52, 18, 18), (206, 84, 70)
-RON, EDGE = 8, 40                            # he's drawn 8 times his art's size, this far in from the right
+RON, EDGE = 8, 40                            # about 480 tall, 40 px in from the right: Nula's art sits at (1400, 35)
 ART = os.path.join(kit.HERE, "art", "swanson.png")   # a drawn Ron, if there is one (and swanson-blink.png, his eyes shut)
 OAK = os.path.join(kit.HERE, "art", "swanson-wood.png")   # drawn oak for the whole screen, if there is one
 
@@ -161,20 +163,20 @@ def scene(quote):
     plain = kit.rgb565(img)
     him = PORTRAIT[0]
     img.paste(him, (RON_AT, HEIGHT - him.height), him)
-    right = RON_AT - 60                      # the quote goes left of him
+    left, top, right, bottom = QUOTE[0], QUOTE[1], min(QUOTE[2], RON_AT - 60), QUOTE[3]
     words = tidy(quote) if quote else "NO QUOTE YET. IT'LL BE HERE ONCE THE KIOSK'S BEEN ONLINE."
-    for scale in (4, 3, 2):                  # as big as it fits
-        lines = wrap(words, (right - 60) // (8 * scale))
-        if len(lines) * 20 * scale <= HEIGHT - 150:
+    for scale in (4, 3, 2):                  # as big as it fits, with room under it for the signature
+        lines = wrap(words, (right - left) // (8 * scale))
+        if len(lines) * 20 * scale <= bottom - top - 48:
             break
-    y, boxes = (HEIGHT - 60 - len(lines) * 20 * scale) // 2, []
+    y, boxes = top + (bottom - top - 48 - len(lines) * 20 * scale) // 2, []
     for line in lines:                       # burnt in: dark letters, a lighter scorch under them
-        x = 60 + (right - 60 - len(line) * 8 * scale) // 2
+        x = left + (right - left - len(line) * 8 * scale) // 2
         kit.text(img, (x + 2, y + 2), line, CHAR, scale=scale)
         kit.text(img, (x, y), line, BURNT, scale=scale)
         boxes.append((x, y, len(line) * 8 * scale + 2, 16 * scale + 2)); y += 20 * scale
-    w = kit.text(img, (right, HEIGHT - 70), "- RON SWANSON", BURNT, scale=2, right=True)
-    boxes.append((right - w, HEIGHT - 70, w, 32))
+    w = kit.text(img, (right, bottom - 32), "- RON SWANSON", BURNT, scale=2, right=True)
+    boxes.append((right - w, bottom - 32, w, 32))
     return {"wood": plain, "full": kit.rgb565(img), "lines": boxes}
 
 
@@ -232,8 +234,13 @@ def frames(c, count):
     him = PORTRAIT[0]
     for k in range(count):
         t = k / max(1, count - 1)            # a lone frame is the first; play() lands on the new page
-        while down < PLANKS and t >= IN * (down + 1) / PLANKS:   # the oak drops in, plank by plank, top to bottom
-            c.reveal(0, down * PLANK, WIDTH, PLANK, src=shown["wood"]); down += 1
+        for p in range(down, PLANKS):        # the oak falls in, plank by plank from the top, each from above the screen
+            k_ = (t - p * DROP) / FALL
+            if k_ >= 1:
+                c.reveal(0, p * PLANK, WIDTH, PLANK, src=shown["wood"]); down = p + 1   # seated, for good
+            elif k_ > 0:                     # still falling, slowing as it lands: whole rows, so one copy
+                y = round(-PLANK - 16 + (p * PLANK + PLANK + 16) * (1 - (1 - k_) ** 2))
+                c.rows(y, shown["wood"][p * PLANK * WIDTH * 2:(p + 1) * PLANK * WIDTH * 2])
         if IN <= t < UP:                     # Ron slides up from below on the right, slowing as he arrives
             k_ = (t - IN) / (UP - IN)
             c.draw(RISING, RON_AT, HEIGHT - round(him.height * (1 - (1 - k_) ** 2)))
@@ -280,4 +287,5 @@ def check():
     for quote in (None, "x" * 240, "Ωμέγα " * 40, "short"):   # nothing yet, the longest, other scripts, a few words
         laid = scene(quote)
         assert len(laid["full"]) == len(laid["wood"]) == WIDTH * HEIGHT * 2
-        assert all(0 <= x and x + w <= RON_AT and 0 <= y and y + h <= HEIGHT for x, y, w, h in laid["lines"]), "the quote stays left of him"
+        assert all(QUOTE[0] <= x and x + w <= min(QUOTE[2] + 2, RON_AT) and QUOTE[1] <= y and y + h <= QUOTE[3] + 2
+                   for x, y, w, h in laid["lines"]), "the quote stays in its place, left of him"

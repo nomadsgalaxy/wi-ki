@@ -21,7 +21,7 @@
  "ask": [],
  "licence": {
   "code": "MIT",
-  "assets": "none: Ron and the wood are drawn in code. The quotes come from the Ron Swanson Quotes API. Ron Swanson is Parks and Recreation's (NBC), played by Nick Offerman: an unofficial fan tribute, for our own kiosks",
+  "assets": "kiosk/art/swanson.png (Ron, 160x160, drawn at 3x) and kiosk/art/swanson-wood.png (the oak, 1920x515) are Nula's pixel art; their licence is still to be confirmed with Nula. The quotes come from the Ron Swanson Quotes API. Ron Swanson is Parks and Recreation's (NBC), played by Nick Offerman: an unofficial fan tribute, for our own kiosks",
   "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine"
  },
  "quality": {
