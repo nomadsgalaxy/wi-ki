@@ -3,7 +3,8 @@
 # system keys and gives them to the Pi locked down: the feed key can only replace ~/.cache/kiosk/desk.json, the control
 # key can only run kiosk/control.py, and the now-playing and system keys can only feed their pages' sinks. Then it
 # installs the feed's user timer and pushes once, starts the now-playing and system streams, links kiosk-ctl into
-# ~/.local/bin and installs the Desk Kiosk tray widget. Safe to run again: it skips whatever is already there.
+# ~/.local/bin (and tells it where in ~/.config/kiosk-ctl), and installs the Desk Kiosk tray widget, in place of the
+# one from before Wi-Ki if that's there. Safe to run again: it skips whatever is already there.
 set -eu
 host=${KIOSK_HOST:-kiosk@kiosk.local}
 here=$(dirname "$(readlink -f "$0")")
@@ -44,8 +45,11 @@ systemctl --user start deskfeed.service   # one push now
 ssh "$host" 'ls -l ~/.cache/kiosk/desk.json && head -c 120 ~/.cache/kiosk/desk.json; echo'
 
 ln -sf "$here/kiosk-ctl" ~/.local/bin/kiosk-ctl
+# where kiosk-ctl goes: the pages' host, and the Pi's setup page (KIOSK_SETUP, when the pages are on a render server)
+printf 'host=%s\nsetup=%s\n' "$host" "${KIOSK_SETUP:-https://${host#*@}}" > ~/.config/kiosk-ctl
 widget=$(mktemp -d)   # the widget runs kiosk-ctl by its full path, so it gets this user's
 cp -r "$here/plasmoid/." "$widget" && sed -i "s|\"kiosk-ctl\"|\"$HOME/.local/bin/kiosk-ctl\"|" "$widget/contents/ui/main.qml"
 kpackagetool6 -t Plasma/Applet -u "$widget" 2>/dev/null || kpackagetool6 -t Plasma/Applet -i "$widget"
+kpackagetool6 -t Plasma/Applet -r org.anthony.deskkiosk 2>/dev/null || true   # the widget from before Wi-Ki
 rm -rf "$widget"
 kiosk-ctl status

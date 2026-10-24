@@ -82,11 +82,19 @@ uses about a third of the Pi's CPU. Nothing on it moves between samples, so you 
 `kiosk-ctl` picks what the kiosk shows:
 
 ```
-kiosk-ctl                 # status: the pages, the one showing, and the pinned one if any
-kiosk-ctl show github     # jump to a page and stay there
-kiosk-ctl auto            # back to the rotation
-kiosk-ctl next            # skip to the next page, and back to the rotation
+kiosk-ctl                        # status: the pages, the one showing, and the pinned one if any
+kiosk-ctl show github            # jump to a page and stay there
+kiosk-ctl auto                   # back to the rotation
+kiosk-ctl next                   # skip to the next page, and back to the rotation
+kiosk-ctl thumbs                 # a small picture of each page, the last time it was on (JSON, base64 JPEGs)
+kiosk-ctl transitions            # the transitions installed, and the ones turned off
+kiosk-ctl transition tetris off  # turn one off (or on); it restarts the display, as the setup page does
+kiosk-ctl setup                  # the setup page's address
 ```
+
+Where it goes is in `~/.config/kiosk-ctl`, which `install.sh` writes: `host=`, where the pages are drawn (the render
+server, if there is one), and `setup=`, the Pi's setup page (set `KIOSK_SETUP` when you run `install.sh` if the pages
+are drawn on a render server).
 
 It uses its own key, `~/.ssh/desk-kiosk-control`, which the Pi only lets run `kiosk/control.py`:
 
@@ -97,6 +105,9 @@ restrict,command="python3 -I /home/kiosk/kiosk/control.py" ssh-ed25519 AAAA… d
 `control.py` checks the page against the playlist and writes `~/.cache/kiosk/control.json`, and `kiosk.py` picks it up
 within a quarter second. A pinned page starts over every time its seconds run out, so the weather still refreshes.
 
-The **Desk Kiosk** tray widget (`plasmoid/`, installed with `kpackagetool6 -t Plasma/Applet -i feed/plasmoid`) runs
-`kiosk-ctl`. Click it for a button per page and Auto and Next; middle-click skips to the next page. The tray icon turns
-into a pin while a page is pinned. It only asks the Pi for status while the popup is open.
+The **Desk Kiosk** tray widget (`plasmoid/`, installed by `install.sh`) runs `kiosk-ctl`, in the kiosk's own look. Click
+it for what's on the kiosk now, a picture of every page in the rotation (the last time each was on screen; the kiosk
+keeps them in `~/.cache/kiosk/thumbs/`) to jump to, Auto, Next and Settings (the setup page, in the browser), and the
+transitions to turn on and off. Middle-click skips to the next page. The tray icon turns into a pin while a page is
+pinned. It only asks the kiosk anything while the popup is open.
+
