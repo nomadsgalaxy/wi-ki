@@ -3,7 +3,9 @@
  "kind": "transition",
  "home": "public",
  "about": "planks drop in with pixel-art Ron Swanson and one of his quotes burnt into the wood, then a saw cuts them away",
- "found": {},
+ "found": {
+  "main": "fe855a"
+ },
  "shapes": [
   "bar"
  ],

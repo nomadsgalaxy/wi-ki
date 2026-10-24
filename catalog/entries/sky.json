@@ -2,7 +2,7 @@
  "name": "sky",
  "kind": "page",
  "home": "public",
- "about": "sunrise, sunset and the day's light, the planets and constellations you can see tonight, the clouds, and the moon",
+ "about": "the sky all the way round, as it is now: the sun by day, then the stars, constellations, planets and moon as it gets dark, under the clouds",
  "found": {
   "main": "3c00f1"
  },
@@ -25,7 +25,7 @@
  "ask": [],
  "licence": {
   "code": "MIT",
-  "assets": "none: everything's drawn in code, in the VGA font",
+  "assets": "stars.json is d3-celestial's star and constellation data by Olaf Frohn, BSD 3-Clause (d3-celestial-LICENSE.txt beside it); everything else is drawn in code",
   "notes": "MIT. The sun, moon and planets are worked out on the kiosk (JPL's approximate planet elements); only the cloud forecast comes from Open-Meteo, and the page draws without it"
  },
  "quality": {
