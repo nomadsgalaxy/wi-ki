@@ -1,36 +1,38 @@
-"""Sky: today's sun, tonight's sky and the moon, for where the kiosk is. Across the screen, the whole day from midnight
-to midnight, coloured by how light the sky is (night, the three twilights, day), with the sun's height drawn over it,
-the sun where it is now, and the cloud forecast along the top. Above it, sunrise, sunset and how long the day is, and
-how much longer or shorter than yesterday's. Beside it, the planets you can see and the constellations that are high
-up: right now once it's dark, and during the day, for this evening. Then the moon as it looks tonight, how much of it
-is lit, and when it's next full and new.
+"""Sky: the kiosk's own sky, all the way round. The screen is a panorama of the horizon, north round to north with south
+in the middle (north, in the southern hemisphere), and the sky over it as it is now: blue by day with the sun where it
+is, a glow where it's setting, then dusk, and as it gets dark the stars come out, brightest first, with the
+constellations drawn between them and named, the planets, and the moon in its phase. Along the bottom, a town's
+rooftops, lit up at night. Above it, sunrise, sunset and the day's length, the moon's phase and next full and new,
+and tonight's clouds. During the day it says which planets will be up this evening.
 
 The sun, moon, planets and stars are all worked out here, from the date and the place, with no network. The sun is
-good to about a minute, the planets to a fraction of a degree, and the full and new moons to about an hour. The clouds
-are Open-Meteo's forecast (no key), fetched every half hour into a cache every renderer on the machine shares
-(kit.Simple). Without it the page still draws, just without clouds.
+good to about a minute, the planets to a fraction of a degree, and the full and new moons to about an hour. The stars
+and constellation lines are d3-celestial's (stars.json, BSD 3-Clause). The clouds are Open-Meteo's forecast (no key),
+fetched every half hour into a cache every renderer on the machine shares (kit.Simple); they dim the sky as much as
+they would. Without them the page still draws, just clear.
 
 Options (in playlist.json, or the setup page's Location): lat and lon (default: central Philadelphia), and place, for
 the heading.
 """
-import json, math, time, urllib.parse, urllib.request
+import json, math, os, random, time, urllib.parse, urllib.request
 from datetime import datetime, timedelta
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from kit import SCREEN, Simple, O, W, G, D, B, A, BG, RULE, RAISED, text, masthead, clock, icon
 
 J2000 = 946728000            # 2000-01-01 12:00 UTC, as a Unix time
 MONTH = 29.530588853         # days from new moon to new moon, on average
 RISE = -0.833                # the sun's height at sunrise and sunset: its radius, and the air bending its light
-DARK = -6                    # the sun this far down (the end of civil twilight): the bright planets and stars are out
-LEFT, TOP, RIGHT, BOTTOM = 40, 168, 1080, 440   # the day chart
-NIGHT = 1120                 # where tonight's sky goes, then the moon at MOON
-MOON = 1490
-SPAN = 70                    # degrees of the sun's height the chart's top half shows
+TOP = 92                     # the panorama, under the masthead
+HORIZON = SCREEN[1] - 44     # the horizon; the town below it
+PX = SCREEN[0] / 360         # pixels a degree, round and up alike (5.3 on the bar: up to about 72 degrees shows)
 API = "https://api.open-meteo.com/v1/forecast?"
 UA = {"User-Agent": "wi-ki sky (github.com/nomadsgalaxy/wi-ki)"}
 mix = lambda colour, k: tuple(round(c * k + b * (1 - k)) for c, b in zip(colour, BG))   # a token, faded toward the background
-SKY = ((0, mix(O, 0.30)), (-6, mix(B, 0.45)), (-12, mix(B, 0.25)), (-18, RAISED), (-90, BG))   # day, the twilights, night
+# the sky's colour by the sun's height: (height, top of the sky, at the horizon); in between, a blend of the two nearest
+SKY = ((6, (30, 78, 120), (120, 176, 214)), (0, (40, 60, 110), (232, 142, 92)), (-6, (24, 26, 64), (110, 70, 110)),
+       (-12, (10, 12, 34), (30, 30, 70)), (-18, BG, (12, 14, 32)))
+TOWN, WINDOW = (6, 7, 18), (255, 206, 106)
 TILT = math.radians(23.43928)   # the Earth's axial tilt, which turns the ecliptic into RA and Dec
 # the planets you can see without a telescope: JPL's Keplerian elements for 1800-2050 (Standish), each as its value at
 # J2000 and its change per century: a (au), e, I, L, the longitude of perihelion and of the ascending node (degrees)
@@ -48,17 +50,8 @@ PLANETS = {
     "SATURN": ((9.53667594, -0.00125060), (0.05386179, -0.00050991), (2.48599187, 0.00193609),
                (49.95424423, 1222.49362201), (92.59887831, -0.41897216), (113.66242448, -0.28867794))}
 SHADE = {"MERCURY": G, "VENUS": W, "MARS": (255, 120, 90), "JUPITER": A, "SATURN": (230, 200, 140)}
-# constellations, by about where their bright stars are (RA in hours, Dec in degrees): enough to say what's up
-STARS = (("ANDROMEDA", 0.8, 37), ("CASSIOPEIA", 1.0, 62), ("PISCES", 0.5, 13), ("ARIES", 2.6, 21),
-         ("PERSEUS", 3.2, 45), ("ERIDANUS", 3.3, -29), ("TAURUS", 4.7, 15), ("ORION", 5.6, 5), ("AURIGA", 6.0, 42),
-         ("CANIS MAJOR", 6.8, -22), ("GEMINI", 7.1, 23), ("CANIS MINOR", 7.6, 6), ("CANCER", 8.6, 20),
-         ("CARINA", 8.7, -63), ("LEO", 10.7, 13), ("URSA MAJOR", 11.3, 51), ("CRUX", 12.4, -60),
-         ("CENTAURUS", 13.1, -47), ("VIRGO", 13.4, -4), ("BOOTES", 14.7, 31), ("URSA MINOR", 15.0, 78),
-         ("DRACO", 15.1, 67), ("LIBRA", 15.2, -15), ("CORONA BOREALIS", 15.8, 33), ("SCORPIUS", 16.9, -27),
-         ("HERCULES", 17.4, 27), ("OPHIUCHUS", 17.4, -8), ("LYRA", 18.85, 36), ("SAGITTARIUS", 19.1, -28),
-         ("AQUILA", 19.7, 3), ("CYGNUS", 20.6, 44), ("CAPRICORNUS", 21.0, -18), ("CEPHEUS", 22.0, 71),
-         ("AQUARIUS", 22.3, -11), ("PISCIS AUSTRINUS", 22.3, -30), ("PEGASUS", 22.7, 19))
-HIGH = 30   # a constellation this many degrees up is clear of the haze and the houses
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "stars.json")) as _f:
+    STARMAP = json.load(_f)   # {"stars": [[RA, Dec, magnitude, B-V]], "lines": {constellation: [[[RA, Dec], ...]]}}
 
 
 def sky_place(ts, ra, dec, lat, lon):
@@ -72,16 +65,32 @@ def sky_place(ts, ra, dec, lat, lon):
     return up, bearing
 
 
-def sun(ts, lat, lon):
-    """the sun's height above the horizon in degrees, at Unix time ts, from lat and lon (the Almanac's low-precision
-    formulas: good to about a hundredth of a degree this century)"""
+def sun_place(ts):
+    """the sun's RA and Dec in degrees at Unix time ts (the Almanac's low-precision formulas: good to about a hundredth
+    of a degree this century)"""
     d = (ts - J2000) / 86400
     g = math.radians(357.529 + 0.98560028 * d)
     ecl = math.radians(280.459 + 0.98564736 * d + 1.915 * math.sin(g) + 0.020 * math.sin(2 * g))
     tilt = math.radians(23.439 - 0.00000036 * d)
-    ra = math.degrees(math.atan2(math.cos(tilt) * math.sin(ecl), math.cos(ecl)))
-    dec = math.degrees(math.asin(math.sin(tilt) * math.sin(ecl)))
-    return sky_place(ts, ra, dec, lat, lon)[0]
+    return (math.degrees(math.atan2(math.cos(tilt) * math.sin(ecl), math.cos(ecl))) % 360,
+            math.degrees(math.asin(math.sin(tilt) * math.sin(ecl))))
+
+
+def sun(ts, lat, lon):
+    """the sun's height above the horizon in degrees, at Unix time ts, from lat and lon"""
+    return sky_place(ts, *sun_place(ts), lat, lon)[0]
+
+
+def moon_place(ts):
+    """the moon's RA and Dec in degrees at Unix time ts, from its biggest wobbles (good to about half a degree)"""
+    d = (ts - J2000) / 86400
+    r = lambda deg: math.radians(deg % 360)
+    mp, D, F, g = r(134.9633964 + 13.06499295 * d), r(297.8501921 + 12.19074912 * d), r(93.2720950 + 13.22935024 * d), r(357.529 + 0.98560028 * d)
+    lon = math.radians(218.3164477 + 13.17639648 * d + 6.289 * math.sin(mp) + 1.274 * math.sin(2 * D - mp)
+                       + 0.658 * math.sin(2 * D) + 0.214 * math.sin(2 * mp) - 0.186 * math.sin(g) - 0.114 * math.sin(2 * F))
+    lat = math.radians(5.128 * math.sin(F))
+    return (math.degrees(math.atan2(math.sin(lon) * math.cos(TILT) - math.tan(lat) * math.sin(TILT), math.cos(lon))) % 360,
+            math.degrees(math.asin(math.sin(lat) * math.cos(TILT) + math.cos(lat) * math.sin(TILT) * math.sin(lon))))
 
 
 def orbit(name, ts):
@@ -238,114 +247,159 @@ class Page(Simple):
         return {"hourly": raw.get("hourly")}
 
     def day(self, when):
-        """the day of when, worked out once: its start and end, the sun's height for each column of the chart, sunrise
-        and sunset, and yesterday's day length"""
+        """the day of when, worked out once: sunrise and sunset, and yesterday's day length"""
         key = (when, self.lat, self.lon)
         if key not in self._days:
             start = time.mktime(datetime.combine(when, datetime.min.time()).timetuple())
             end = time.mktime(datetime.combine(when + timedelta(days=1), datetime.min.time()).timetuple())   # 23 or 25 h when the clocks change
-            heights = [sun(start + (end - start) * x / (RIGHT - LEFT), self.lat, self.lon) for x in range(RIGHT - LEFT)]
             rise, sets = crossings(start, self.lat, self.lon, round((end - start) / 60))
             before = crossings(start - 86400, self.lat, self.lon)
             self._days.clear()   # one day at a time is plenty
-            self._days[key] = {"start": start, "end": end, "heights": heights, "rise": rise, "set": sets,
+            self._days[key] = {"rise": rise, "set": sets, "noon": sun(start + 12 * 3600, self.lat, self.lon),
                                "yesterday": (before[1] - before[0]) % 86400 if None not in before else None}
         return self._days[key]
 
+    def where(self, ts, ra, dec):
+        """something at ra and dec, on the screen at Unix time ts -> (x, y, its height above the horizon)"""
+        up, bearing = sky_place(ts, ra, dec, self.lat, self.lon)
+        middle = 0 if self.lat < 0 else 180   # face the way the sun goes: south, or north in the southern hemisphere
+        return (bearing - middle + 180) % 360 * PX, HORIZON - up * PX, up
+
+    def planets(self, ts):
+        """the planets up at Unix time ts that you could see then -> [(name, x, y, height, bearing)], highest first"""
+        out = []
+        for name in SHADE:
+            ra, dec = planet(name, ts)
+            x, y, up = self.where(ts, ra, dec)
+            if up > 5 and (name != "MERCURY" or up > 10):   # Mercury only shows when it's clear of the glow
+                out.append((name, x, y, up, sky_place(ts, ra, dec, self.lat, self.lon)[1]))
+        return sorted(out, key=lambda p: -p[3])
+
     def tonight(self, now, day):
-        """when to show the night sky for -> (Unix time, what to call it), or None if it never gets dark today: now,
-        once it's dark, or else an hour and a half after sunset"""
+        """when to say what's up this evening -> (Unix time, what to call it), or None if it never gets dark: an hour
+        and a half after sunset, once it's set and it's not dark yet"""
         ts = time.mktime(now.timetuple())
-        if sun(ts, self.lat, self.lon) < DARK:
-            return ts, "UP NOW"
         if day["set"] and day["set"] > ts:
             at = day["set"] + 90 * 60
             return at, "TONIGHT AT " + clock(datetime.fromtimestamp(at - at % 900))
         return None
 
     def draw(self, img, now, data):
-        day, d = self.day(now.date()), ImageDraw.Draw(img)
         clouds = data if isinstance(data, dict) else {}
+        ts, day = time.mktime(now.timetuple()), self.day(now.date())
+        sun_ra, sun_dec = sun_place(ts)
+        sx, sy, sun_up = self.where(ts, sun_ra, sun_dec)
+        cover = clouds.get(now.strftime("%Y-%m-%dT%H:00"))
+        w, h = SCREEN[0], HORIZON - TOP
+        # the sky: a blend from its top to the horizon by the sun's height, and a glow round where the sun is low
+        top, low = shade(sun_up)
+        sky = Image.new("RGB", (1, h)); d = ImageDraw.Draw(sky)
+        for y in range(h):
+            k = (y / h) ** 2
+            d.point((0, y), tuple(round(a * (1 - k) + b * k) for a, b in zip(top, low)))
+        sky = sky.resize((w, h))
+        if -12 < sun_up < 8:   # the glow: strongest near the sun, over the bottom of the sky
+            near = Image.new("L", (w, 1)); n = ImageDraw.Draw(near)
+            for x in range(w):
+                apart = min(abs(x - sx), w - abs(x - sx)) / PX   # degrees round from the sun, either way
+                n.point((x, 0), round(255 * max(0, 1 - apart / 70) * max(0, 1 - abs(sun_up - 0) / 12)))
+            fade = Image.new("L", (1, h)); f = ImageDraw.Draw(fade)
+            for y in range(h):
+                f.point((0, y), round(255 * (y / h) ** 3))
+            glow = ImageChops.multiply(near.resize((w, h)), fade.resize((w, h)))
+            sky = Image.composite(Image.new("RGB", (w, h), (255, 150, 80)), sky, glow.point(lambda v: v * 6 // 10))
+        img.paste(sky, (0, TOP))
+        d = ImageDraw.Draw(img)
+        # the stars, once it's dark enough to see them: the faintest that shows gets fainter as the sun goes down, and
+        # clouds take some back
+        faintest = min(4.5, -1 + (-4 - sun_up) * 0.47) - (cover or 0) / 100 * 3
+        fit = lambda x, y: 0 <= x < w and TOP <= y < HORIZON
+        if faintest > 1.5:   # the constellations, faint lines between their stars, and their names
+            line = blend(mix(B, 0.42), top, min(1, (faintest - 1.5) / 2))
+            taken = []
+            for name, segments in sorted(STARMAP["lines"].items(), key=lambda c: -sum(map(len, c[1]))):
+                points = []
+                for segment in segments:
+                    spots = [self.where(ts, ra, dec) for ra, dec in segment]
+                    points += spots
+                    for (x0, y0, u0), (x1, y1, u1) in zip(spots, spots[1:]):
+                        if u0 > 0 and u1 > 0 and abs(x1 - x0) < w / 2:   # both up, and not across the screen's edge
+                            d.line((x0, y0, x1, y1), fill=line)
+                up = [(x, y) for x, y, u in points if u > 0]
+                if len(up) == len(points) and faintest > 2.5:   # a name for the ones all the way up, where it fits
+                    xs = [x for x, _ in up]
+                    if max(xs) - min(xs) < w / 2:
+                        lx, ly = sum(xs) / len(xs), max(y for _, y in up) + 8
+                        box = (lx - len(name) * 4, ly, lx + len(name) * 4, ly + 16)
+                        if box[3] < HORIZON - 40 and not any(box[0] < t[2] and t[0] < box[2] and box[1] < t[3] and t[1] < box[3] for t in taken):
+                            text(img, (round(box[0]), round(ly)), name.upper(), line, scale=1); taken.append(box)
+        if faintest > -1:
+            for ra, dec, mag, bv in STARMAP["stars"]:
+                if mag > faintest:
+                    break   # they're brightest first
+                x, y, up = self.where(ts, ra, dec)
+                if up <= 0 or not fit(x, y):
+                    continue
+                colour = blend((170, 200, 255) if bv < 0 else (236, 240, 255) if bv < 0.5 else (255, 238, 206) if bv < 1 else (255, 204, 160),
+                               top, min(1, (faintest - mag) / 1.2 + 0.45))
+                r = 2 if mag < 1 else 1 if mag < 2.2 else 0.5 if mag < 3.5 else 0   # big enough to see across a room
+                d.rectangle((round(x - r), round(y - r), round(x + r), round(y + r)), fill=colour)
+        # the planets that are up, and named, once it's dark enough for them to show
+        for name, x, y, up, _ in self.planets(ts) if sun_up < -3 else []:
+            if fit(x, y):
+                d.rectangle((round(x) - 3, round(y) - 3, round(x) + 3, round(y) + 3), fill=SHADE[name])
+                text(img, (round(x) + 8, round(y) - 6), name, SHADE[name], scale=1)
+        # the moon, in its phase, wherever it is (day or night)
+        age, lit, phase = moon(ts)
+        mx, my, moon_up = self.where(ts, *moon_place(ts))
+        if moon_up > -1 and fit(mx, my):
+            m = disc(age, 40, self.lat < 0)
+            img.paste(m, (round(mx) - 20, round(my) - 20), m)
+        if cover:   # the clouds: the sky goes grey and dim as much as they cover it
+            part = img.crop((0, TOP, w, HORIZON))
+            grey = (210, 214, 222) if sun_up > 0 else (34, 36, 48)
+            img.paste(Image.blend(part, Image.new("RGB", part.size, grey), cover / 100 * 0.55), (0, TOP))
+        town(img, sun_up, 0 if self.lat < 0 else 180)
+        # the sun, where it is: moving() draws it, so it can shine
+        self.sunspot = (round(sx) - 24, round(sy) - 24) if sun_up > -2 and 0 <= sx - 24 and sx + 24 <= w and sy + 24 <= HORIZON else None
+        if self.sunspot:
+            self.behind = img.crop((*self.sunspot, self.sunspot[0] + 48, self.sunspot[1] + 48))
+        ImageDraw.Draw(img).rectangle((0, 0, w, TOP - 1), fill=BG)   # lines that ran up past the sky's top, gone
         place = str(self.place or "")[:24].upper()
         masthead(img, now, "// SKY" + (f" · {place}" if place else ""), "SUN, STARS & MOON")
-        y0 = (TOP + BOTTOM) // 2   # the horizon
-        y = lambda h: y0 - round(max(-SPAN, min(SPAN, h)) / SPAN * (y0 - TOP))
-        width = RIGHT - LEFT
-        for x, h in enumerate(day["heights"]):   # the sky's colour, column by column, and the clouds along the top
-            d.line((LEFT + x, TOP, LEFT + x, BOTTOM), fill=next(c for low, c in SKY if h >= low))
-            cover = clouds.get(datetime.fromtimestamp(day["start"] + (day["end"] - day["start"]) * x / width).strftime("%Y-%m-%dT%H:00"))
-            if cover is not None:
-                d.line((LEFT + x, TOP - 14, LEFT + x, TOP - 4), fill=mix(G, 0.1 + 0.9 * cover / 100))
-        if clouds:
-            text(img, (RIGHT, TOP - 34), "clouds: open-meteo.com", D, scale=1, right=True)
-        d.rectangle((LEFT, y0, RIGHT - 1, y0 + 1), fill=G)
-        d.line([(LEFT + x, y(h)) for x, h in enumerate(day["heights"])], fill=A, width=3)
-        for hour in range(0, 25, 3):   # the hours along the bottom
-            x = LEFT + round((width - 1) * hour / 24)
-            d.rectangle((x, BOTTOM, x, BOTTOM + 6), fill=D)
-            label = "12a" if hour % 24 == 0 else "12p" if hour == 12 else f"{hour % 12}{'a' if hour < 12 else 'p'}"
-            text(img, (x - (0 if hour == 0 else len(label) * 8 if hour == 24 else len(label) * 4), BOTTOM + 10), label, D, scale=1)
+        self.words(img, now, ts, day, clouds, cover, phase, lit)
+
+    def words(self, img, now, ts, day, clouds, cover, phase, lit):
+        """the day's times on the left, the moon and the clouds on the right, and tonight's planets during the day"""
         rise, sets = day["rise"], day["set"]
         if rise and sets:
             long, was = (sets - rise) % 86400, day["yesterday"]
-            words = [("SUNRISE ", G), (clock(datetime.fromtimestamp(rise)), W), ("  SUNSET ", G),
-                     (clock(datetime.fromtimestamp(sets)), W), ("  DAY ", G), (length(long), W)]
+            said = [("SUNRISE ", G), (clock(datetime.fromtimestamp(rise)), W), ("  SUNSET ", G),
+                    (clock(datetime.fromtimestamp(sets)), W), ("  DAY ", G), (length(long), W)]
             if was:
                 change = round(long - was)
-                words.append((f"  {'+' if change >= 0 else '-'}{abs(change) // 60}m {abs(change) % 60:02d}s", O if change >= 0 else B))
+                said.append((f"  {'+' if change >= 0 else '-'}{abs(change) // 60}m {abs(change) % 60:02d}s", O if change >= 0 else B))
         else:
-            words = [("THE SUN STAYS " + ("UP" if day["heights"][0] > RISE else "DOWN") + " ALL DAY", W)]
-        x = LEFT
-        for said, colour in words:
-            x += text(img, (x, 104), said, colour, scale=2)
-        # now: a line down the chart, and the sun on its path (moving() draws it there, so it can shine)
-        x = max(0, min(width - 1, round((time.mktime(now.timetuple()) - day["start"]) / (day["end"] - day["start"]) * width)))
-        d.rectangle((LEFT + x, TOP, LEFT + x, BOTTOM), fill=W)
-        self.sunspot = (LEFT + x - 24, y(day["heights"][x]) - 24)
-        self.behind = img.crop((*self.sunspot, self.sunspot[0] + 48, self.sunspot[1] + 48))   # to draw the sun over
-        self.night(img, now, day, clouds)
-        # the moon, on the right
-        age, lit, phase = moon(time.mktime(now.timetuple()))
-        m = disc(age, 120, self.lat < 0)
-        img.paste(m, (MOON, 112), m)
-        text(img, (MOON + 140, 116), phase.replace("WAXING ", "WAXING\n").split("\n")[0] if len(phase) > 13 else phase, W, scale=2)
-        if len(phase) > 13:
-            text(img, (MOON + 140, 148), phase.split(" ", 1)[1], W, scale=2)
-        text(img, (MOON + 140, 184), f"{round(lit * 100)}% lit", G, scale=2)
-        for i, (said, angle) in enumerate((("full", 180), ("new", 0))):
-            when = datetime.fromtimestamp(next_phase(time.mktime(now.timetuple()), angle))
-            text(img, (MOON, 256 + i * 72), f"{said} moon {when.strftime('%a %b')} {when.day}", O if said == "full" else G, scale=2)
-            text(img, (MOON, 292 + i * 72), clock(when), D, scale=1)
-
-    def night(self, img, now, day, clouds):
-        """the planets you can see and the constellations high up, now or this evening, and the clouds then"""
-        when = self.tonight(now, day)
-        if not when:
-            text(img, (NIGHT, 112), "NO DARK TONIGHT", G, scale=2)
-            return
-        ts, title = when
-        text(img, (NIGHT, 112), title, O, scale=2)
-        cover = clouds.get(datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:00"))
+            said = [("THE SUN STAYS " + ("UP" if day["noon"] > RISE else "DOWN") + " ALL DAY", W)]
+        x = 24
+        for words, colour in said:
+            x += text(img, (x, 100), words, colour, scale=2)
+        tonight = self.tonight(now, day)
+        if tonight and sun(ts, self.lat, self.lon) > -3:
+            at, title = tonight
+            up = self.planets(at)
+            later = clouds.get(datetime.fromtimestamp(at).strftime("%Y-%m-%dT%H:00"))
+            line = title + ": " + (", ".join(f"{name.title()} {compass(bearing)}" for name, _, _, _, bearing in up) or "no bright planets")
+            if later is not None:
+                line += f" · {cloudy(later).lower()}"
+            text(img, (24, 136), line[:110], O, scale=1)
+        R = SCREEN[0] - 24
+        text(img, (R, 100), f"{phase} · {round(lit * 100)}%", W, scale=2, right=True)
+        full, new = (datetime.fromtimestamp(next_phase(ts, angle)) for angle in (180, 0))
+        text(img, (R, 136), f"full {full.strftime('%a %b')} {full.day}, {clock(full)} · new {new.strftime('%a %b')} {new.day}", G, scale=1, right=True)
         if cover is not None:
-            text(img, (NIGHT, 146), f"{cloudy(cover)} · {cover}% cloud", A if cover >= 50 else G, scale=1)
-        seen = []
-        for name in SHADE:
-            up, bearing = sky_place(ts, *planet(name, ts), self.lat, self.lon)
-            if up > 5 and (name != "MERCURY" or up > 10):   # Mercury only shows when it's clear of the glow
-                seen.append((up, name, bearing))
-        y = 174
-        for up, name, bearing in sorted(seen, reverse=True):
-            text(img, (NIGHT, y), name, SHADE[name], scale=2)
-            text(img, (NIGHT + 150, y + 8), f"{compass(bearing)}, {round(up)}° up", G, scale=1)
-            y += 30
-        if not seen:
-            text(img, (NIGHT, y), "no bright planets", D, scale=2); y += 30
-        high = sorted(((sky_place(ts, ra * 15, dec, self.lat, self.lon), name) for name, ra, dec in STARS), reverse=True)
-        names = [name for (up, _), name in high if up > HIGH][:8]
-        if names:
-            text(img, (NIGHT, y + 8), "HIGH UP", D, scale=1)
-            for i, name in enumerate(names):
-                text(img, (NIGHT + i % 2 * 180, y + 28 + i // 2 * 20), name.title(), W, scale=1)
+            text(img, (R, 156), f"{cloudy(cover).lower()} · {cover}% cloud", A if cover >= 50 else G, scale=1, right=True)
+        text(img, (R, 176 if cover is not None else 156), "stars: d3-celestial · clouds: open-meteo.com", D, scale=1, right=True)
 
     def moving(self, now, t, data):
         """the sun on its path, its rays turning twice a second"""
@@ -354,6 +408,45 @@ class Page(Simple):
         sun_ = icon("sun", int(t * 2) % 2).resize((48, 48), Image.NEAREST)
         out = self.behind.copy(); out.paste(sun_, (0, 0), sun_)
         return [(out, self.sunspot)]
+
+
+def shade(up):
+    """the sky's colour, top and at the horizon, with the sun up degrees"""
+    for (h0, t0, b0), (h1, t1, b1) in zip(SKY, SKY[1:]):
+        if up >= h1:
+            k = 1 if up >= h0 else (up - h1) / (h0 - h1)
+            return blend(t0, t1, k), blend(b0, b1, k)
+    return SKY[-1][1], SKY[-1][2]
+
+
+def blend(a, b, k):
+    """a, k of the way from b"""
+    return tuple(round(x * k + y * (1 - k)) for x, y in zip(a, b))
+
+
+def town(img, sun_up, middle):
+    """the rooftops along the bottom, the same every day, with a few windows lit after dark, and the compass under
+    them, middle being the bearing in the middle of the screen"""
+    rng, d = random.Random(76), ImageDraw.Draw(img)
+    d.rectangle((0, HORIZON, SCREEN[0], SCREEN[1]), fill=TOWN)
+    x = 0
+    while x < SCREEN[0]:
+        bw, bh = rng.randrange(30, 110), rng.randrange(6, 34)
+        if rng.random() < 0.25:   # a tree
+            d.ellipse((x, HORIZON - bh - 10, x + bw // 2, HORIZON + 4), fill=TOWN)
+        else:
+            d.rectangle((x, HORIZON - bh, x + bw, HORIZON), fill=TOWN)
+            if rng.random() < 0.3:   # a pitched roof
+                d.polygon([(x, HORIZON - bh), (x + bw // 2, HORIZON - bh - 12), (x + bw, HORIZON - bh)], fill=TOWN)
+            for wy in range(HORIZON - bh + 6, HORIZON - 4, 8):
+                for wx in range(x + 6, x + bw - 6, 10):
+                    if rng.random() < 0.18 and sun_up < -3:
+                        d.rectangle((wx, wy, wx + 3, wy + 3), fill=WINDOW)
+        x += bw + rng.randrange(0, 20)
+    for bearing, name in ((0, "N"), (45, "NE"), (90, "E"), (135, "SE"), (180, "S"), (225, "SW"), (270, "W"), (315, "NW")):
+        x = (bearing - middle + 180) % 360 * PX
+        for x in (x, x + SCREEN[0]) if x < 1 else (x,):   # the edges are the same bearing: say it at both
+            text(img, (max(8, min(SCREEN[0] - 8 - len(name) * 8, round(x) - len(name) * 4)), HORIZON + 22), name, D, scale=1)
 
 
 def check():
@@ -384,6 +477,16 @@ def check():
     assert abs(up - 39.95) < 0.2 and compass(bearing) == "N", (up, bearing)
     assert clean(None) is None and clean({"hourly": {"time": ["2026-10-19T21:00"], "cloud_cover": ["x"]}}) is None
     assert clean(Page.SAMPLE)["2026-10-19T00:00"] == 50 and cloudy(10) == "CLEAR" and cloudy(90) == "OVERCAST"
+    # the panorama: Polaris over the north at the screen's edges, as high as Philadelphia is far north; the sky's colour
+    # follows the sun; and the star map is all there
+    page = Page(39.95, -75.17)
+    x, y, up = page.where(utc(2026, 10, 19, 1), 37.95, 89.26)
+    assert (x < 20 or x > SCREEN[0] - 20) and abs(y - (HORIZON - 39.95 * PX)) < 3 * PX, (x, y)
+    assert shade(30) == (SKY[0][1], SKY[0][2]) and shade(-30) == (SKY[-1][1], SKY[-1][2]) and shade(-3) != shade(3)
+    assert len(STARMAP["stars"]) > 800 and len(STARMAP["lines"]) == 88 and STARMAP["stars"][0][2] < 0, "Sirius first"
+    sky = lambda when: Page.showing(None).picture(when, None, safe=False).crop((0, 200, SCREEN[0], HORIZON - 60))
+    lit = lambda img: sum(1 for p in img.getdata() if min(p) > 150)
+    assert lit(sky(datetime(2026, 10, 19, 23))) > 200 and lit(sky(datetime(2026, 10, 19, 14))) == 0, "stars at night, none by day"
     Page.check()
     for lat, lon in ((39.95, -75.17), (78.2, 15.6), (-33.9, 151.2), (0, 0), ("91", "400")):   # anywhere, even off the map
         page = Page.showing(Page.SAMPLE, lat=lat, lon=lon, place="somewhere with a long name")
