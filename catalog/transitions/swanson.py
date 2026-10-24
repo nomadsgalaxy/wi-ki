@@ -5,21 +5,26 @@ Nick Offerman's Ron Swanson in Parks and Recreation; nothing official.
 
 The quote comes from the Ron Swanson Quotes API (no key). A transition can't wait on the internet, so it shows a quote
 fetched earlier and kept in ~/.cache/kiosk/swanson.json, and fetches the next one in the background as it plays, at
-most every few minutes. Until the first one arrives it says so on the wood. The planks with the quote on them are
-drawn in that background thread too, so playing it is all whole-row copies.
+most every few minutes, five at a time. It shows the newest one short enough to read in the hold, chosen and laid out
+before it starts and kept for the whole play. Until the first one arrives it says so on the wood. The planks with the
+quote on them are drawn in that background thread too, so playing it is all whole-row copies.
+
+Ron is drawn in code, unless there's a drawn one in kiosk/art/swanson.png (and swanson-blink.png, his eyes shut): the
+art is only him, never the wood or the quote, and only what differs between the two blinks.
 """
 import json, os, random, re, threading, time, urllib.request
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 import kit
 from .canvas import WIDTH, HEIGHT, sprite
 
 SECONDS = 5
-STILL = 2.8                                  # seconds it holds still, to be read
+STILL = 3.4                                  # seconds it holds still, to be read
 PLANKS = 5
 PLANK = -(-HEIGHT // PLANKS)                 # 103 rows
-IN, OUT = 0.12, 0.70                         # the planks are all in by here, and start coming away here
-API = "https://ron-swanson-quotes.herokuapp.com/v2/quotes"
+IN, OUT = 0.08, 0.76                         # the planks are all in by here, and start coming away here
+API = "https://ron-swanson-quotes.herokuapp.com/v2/quotes/5"   # five at a time, so there are short ones to choose from
+SHORT = 110                                  # characters: a quote this long can be read in the hold
 UA = {"User-Agent": "wi-ki swanson (github.com/nomadsgalaxy/wi-ki)"}
 CACHE = os.path.expanduser("~/.cache/kiosk/swanson.json")
 KEEP, EVERY = 30, 300                        # quotes kept for when it's offline, and seconds between fetches
@@ -30,7 +35,7 @@ SKIN, SHADE, HAIR, HAIR_LIT, STACHE, STACHE_DARK, INK, LIP = (226, 172, 132), (1
 RED, DARK, LIGHT = (168, 36, 36), (52, 18, 18), (206, 84, 70)
 RON, RON_X = 8, 40                           # he's drawn 8 times his art's size, on the left, shoulders on the bottom
 TEXT_X = RON_X + 48 * RON + 40               # the quote goes right of him
-EYES = (16, 17, 34, 25)                      # the part of his art that blinks
+ART = os.path.join(kit.HERE, "art", "swanson.png")   # a drawn Ron, if there is one (and swanson-blink.png, his eyes shut)
 
 
 def ron(blink=False):
@@ -97,6 +102,32 @@ def wrap(words, width):
     return lines
 
 
+def portrait():
+    """Ron, open-eyed and blinking, at the size he's drawn -> (open, shut), RGBA. A drawn Ron in kiosk/art/swanson.png
+    takes the place of the one in code: scaled up by whole pixels to about 480 tall, and swanson-blink.png beside it is
+    him blinking (without it, he doesn't)"""
+    if os.path.exists(ART):
+        art = Image.open(ART).convert("RGBA")
+        k = max(1, (60 * RON) // art.height)
+        size = (art.width * k, art.height * k)
+        blink = ART.replace(".png", "-blink.png")
+        shut = Image.open(blink).convert("RGBA") if os.path.exists(blink) else art
+        return art.resize(size, Image.NEAREST), shut.resize(size, Image.NEAREST)
+    return tuple(ron(blink).resize((48 * RON, 60 * RON), Image.NEAREST) for blink in (False, True))
+
+
+def blinking(open_, shut):
+    """the blink: only the part of him that changes when his eyes shut -> (a sprite of it, where it goes in him), or
+    (None, None) if nothing does"""
+    box = ImageChops.difference(open_, shut).convert("RGB").getbbox()   # the colours: an RGBA bbox only looks at alpha
+    return (sprite(shut.crop(box)), box[:2]) if box else (None, None)
+
+
+def pick(kept):
+    """the quote to show: the newest one short enough to read in the hold, or else the shortest there is"""
+    return next((q for q in kept if len(q) <= SHORT), min(kept, key=len) if kept else None)
+
+
 def planks(quote):
     """the planks with quote burnt in, the whole screen of them -> packed bytes"""
     rng = random.Random(quote)
@@ -113,7 +144,7 @@ def planks(quote):
         d.rectangle((0, top + PLANK - 3, WIDTH, top + PLANK - 1), fill=BURNT)   # the seam
         for x in (40, WIDTH - 52):           # nails
             d.rectangle((x, top + PLANK // 2 - 6, x + 11, top + PLANK // 2 + 5), fill=STEEL)
-    him = ron().resize((48 * RON, 60 * RON), Image.NEAREST)
+    him = PORTRAIT[0]
     img.paste(him, (RON_X, HEIGHT - him.height), him)
     words = tidy(quote) if quote else "NO QUOTE YET. IT'LL BE HERE ONCE THE KIOSK'S BEEN ONLINE."
     for scale in (4, 3, 2):                  # as big as it fits
@@ -139,7 +170,8 @@ def blade():
 
 
 BLADE = blade()
-SHUT = sprite(ron(blink=True).crop(EYES), RON)   # his eyes shut, drawn over the open ones for a blink
+PORTRAIT = portrait()
+SHUT, SHUT_AT = blinking(*PORTRAIT)
 ready = {"quote": None, "bytes": None}       # the next planks, drawn ahead in the background
 _busy = threading.Lock()
 
@@ -158,22 +190,23 @@ def refresh():
             try:
                 with urllib.request.urlopen(urllib.request.Request(API, headers=UA), timeout=10) as r:
                     got = json.load(r)
-                if isinstance(got, list) and got and isinstance(got[0], str) and got[0].strip():
-                    kept = ([tidy(got[0])] + [q for q in kept if q != tidy(got[0])])[:KEEP]
+                new = [tidy(q) for q in got if isinstance(q, str) and q.strip()] if isinstance(got, list) else []
+                if new:
+                    kept = (new + [q for q in kept if q not in new])[:KEEP]
                     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
                     with open(CACHE + ".tmp", "w") as f:
                         json.dump(kept, f)
                     os.replace(CACHE + ".tmp", CACHE)
             except Exception:
                 pass                         # offline, or the API's away: the kept ones do
-        quote = kept[0] if kept else None
+        quote = pick(kept)
         ready["quote"], ready["bytes"] = quote, planks(quote)
     finally:
         _busy.release()
 
 
 def frames(c, count):
-    backdrop = ready["bytes"] or planks(ready["quote"] or (quotes() or [None])[0])
+    backdrop = ready["bytes"] or planks(ready["quote"] or pick(quotes()))   # chosen now, and kept for the whole play
     ready["bytes"] = None                    # this one's used: draw the next while this plays
     threading.Thread(target=refresh, daemon=True).start()
     down, gone = 0, 0
@@ -181,8 +214,8 @@ def frames(c, count):
         t = k / max(1, count - 1)            # a lone frame is the first; play() lands on the new page
         while down < PLANKS and t >= IN * (down + 1) / PLANKS:   # the planks drop in, top to bottom
             c.reveal(0, down * PLANK, WIDTH, PLANK, src=backdrop); down += 1
-        if IN <= t < OUT and (t - IN) % 0.25 < 0.025:   # a blink now and then, while it's being read
-            c.draw(SHUT, RON_X + EYES[0] * RON, HEIGHT - 60 * RON + EYES[1] * RON)
+        if SHUT and IN <= t < OUT and (t - IN) % 0.25 < 0.025:   # a blink now and then, while it's being read
+            c.draw(SHUT, RON_X + SHUT_AT[0], HEIGHT - PORTRAIT[0].height + SHUT_AT[1])
         if t >= OUT:                         # the saw runs along each seam, and that plank comes away
             span = (1 - OUT) / PLANKS
             while gone < PLANKS and t >= OUT + span * (gone + 1):
@@ -202,5 +235,19 @@ def check():
         assert quotes() == [], "no cache, no quotes"
     finally:
         CACHE = real
+    assert pick(["x" * 200, "short one", "another"]) == "short one" and pick(["x" * 300, "y" * 200]) == "y" * 200 and pick([]) is None
+    # a drawn Ron takes the place of the one in code, and only what changes in his blink is drawn for it
+    import tempfile
+    global ART
+    real_art = ART
+    with tempfile.TemporaryDirectory() as folder:
+        ART = os.path.join(folder, "swanson.png")
+        art = Image.new("RGBA", (60, 80), (200, 150, 120, 255)); art.save(ART)
+        shut = art.copy(); ImageDraw.Draw(shut).rectangle((20, 30, 39, 33), fill=(0, 0, 0, 255)); shut.save(ART.replace(".png", "-blink.png"))
+        open_, closed = portrait()
+        spr, at = blinking(open_, closed)
+        assert open_.size == (360, 480) and at == (120, 180) and (spr["w"], spr["h"]) == (120, 24), (open_.size, at)
+    ART = real_art
+    assert blinking(PORTRAIT[0], PORTRAIT[0]) == (None, None), "no blink picture, no blink"
     for quote in (None, "x" * 240, "Ωμέγα " * 40, "short"):   # nothing yet, the longest, other scripts, a few words
         assert len(planks(quote)) == WIDTH * HEIGHT * 2
