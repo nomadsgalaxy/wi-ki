@@ -2,9 +2,9 @@
  "name": "sky",
  "kind": "page",
  "home": "public",
- "about": "the sky all the way round, as it is now: the sun by day, then the stars, constellations, planets and moon as it gets dark, under the clouds",
+ "about": "the sky all the way round, as it is now, over a pixel skyline: the sun by day, then the stars, constellations, planets and moon as it gets dark and the windows light up",
  "found": {
-  "main": "3c00f1"
+  "main": "242c08"
  },
  "shapes": [
   "bar"
@@ -25,7 +25,7 @@
  "ask": [],
  "licence": {
   "code": "MIT",
-  "assets": "stars.json is d3-celestial's star and constellation data by Olaf Frohn, BSD 3-Clause (d3-celestial-LICENSE.txt beside it); everything else is drawn in code",
+  "assets": "stars.json is d3-celestial's star and constellation data by Olaf Frohn, BSD 3-Clause (d3-celestial-LICENSE.txt beside it). skyline-day, -dusk, -night and -windows.png are an AI-generated, Philadelphia-inspired pixel skyline made for this page from Anthony's reference photo: decoration, not a survey of the real horizon. Everything else is drawn in code",
   "notes": "MIT. The sun, moon and planets are worked out on the kiosk (JPL's approximate planet elements); only the cloud forecast comes from Open-Meteo, and the page draws without it"
  },
  "quality": {

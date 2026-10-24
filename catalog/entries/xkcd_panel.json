@@ -1,0 +1,35 @@
+{
+ "name": "xkcd_panel",
+ "kind": "transition",
+ "home": "public",
+ "about": "a small xkcd comic between pages: the screen goes dark with its alt text, the comic prints in, then the new page comes down over it",
+ "found": {
+  "main": "c155c5"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "xkcd.com",
+   "imgs.xkcd.com"
+  ],
+  "secrets": []
+ },
+ "settings": {},
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "none in the repo. The comics are fetched from xkcd.com: Randall Munroe's, CC BY-NC 2.5, credited on screen",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine. xkcd's licence is non-commercial: fine on our own kiosks, not on one run for profit"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}

@@ -1,0 +1,43 @@
+{
+ "name": "xkcd",
+ "kind": "page",
+ "home": "public",
+ "about": "the latest xkcd comic (or a random one), as big as it fits, with its alt text beside it",
+ "found": {
+  "main": "8fa710"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "xkcd.com",
+   "imgs.xkcd.com"
+  ],
+  "secrets": []
+ },
+ "settings": {
+  "random": false
+ },
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "none in the repo. The comics are fetched from xkcd.com: Randall Munroe's, CC BY-NC 2.5, credited on screen",
+  "notes": "MIT. xkcd's licence is non-commercial: fine on our own kiosks, not on one run for profit"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ },
+ "form": {
+  "random": {
+   "type": "bool",
+   "label": "A random comic every hour, instead of the latest"
+  }
+ }
+}
