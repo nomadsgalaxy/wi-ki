@@ -1,0 +1,56 @@
+{
+ "name": "air",
+ "kind": "page",
+ "home": "public",
+ "about": "the US air quality index, what's in the air and the UV, now and for the next 24 hours",
+ "found": {},
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [
+   "air-quality-api.open-meteo.com"
+  ],
+  "secrets": []
+ },
+ "settings": {
+  "lat": null,
+  "lon": null,
+  "place": null
+ },
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "none: everything's drawn in code, in the VGA font",
+  "notes": "MIT. The data is Open-Meteo's air quality forecast (CAMS), free with no key, and it asks to be credited"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ },
+ "form": {
+  "lat": {
+   "type": "number",
+   "label": "Latitude",
+   "min": -90,
+   "max": 90
+  },
+  "lon": {
+   "type": "number",
+   "label": "Longitude",
+   "min": -180,
+   "max": 180
+  },
+  "place": {
+   "type": "text",
+   "label": "Place, for the heading",
+   "max": 24,
+   "upper": true
+  }
+ }
+}
