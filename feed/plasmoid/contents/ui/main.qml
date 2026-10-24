@@ -185,7 +185,7 @@ PlasmoidItem {
         property bool usable: !root.waiting
         signal pressed()
 
-        implicitHeight: Kirigami.Units.gridUnit * 2.2
+        implicitHeight: Kirigami.Units.gridUnit * 2.6
         implicitWidth: words.implicitWidth + Kirigami.Units.largeSpacing * 2
         radius: 2
         color: lit ? Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.14) : root.raised
@@ -199,7 +199,7 @@ PlasmoidItem {
             text: button.label
             color: button.lit ? root.cyan : root.starlight
             font.family: root.mono
-            font.pixelSize: Kirigami.Units.gridUnit * 0.95
+            font.pixelSize: Kirigami.Units.gridUnit * 1.15
         }
 
         MouseArea {
@@ -215,10 +215,13 @@ PlasmoidItem {
     fullRepresentation: PlasmaExtras.Representation {
         id: popup
 
-        // sized from its parts, never from itself: a popup bound to its own implicitHeight grows a little each layout
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 52
-        Layout.preferredHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
-        Layout.maximumHeight: Layout.preferredHeight
+        // sized from its parts, never from itself: a popup bound to its own implicitHeight grows a little each layout.
+        // The tray only honours a widget's minimum size, so that's set too, or it shrinks the popup to its own default
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 64
+        Layout.preferredWidth: Layout.minimumWidth
+        Layout.minimumHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
+        Layout.preferredHeight: Layout.minimumHeight
+        Layout.maximumHeight: Layout.minimumHeight
 
         background: Rectangle {   // the popup's own background slot: inside the layout, a box can't fill it
             color: root.space
@@ -241,7 +244,7 @@ PlasmoidItem {
                     text: "// DESK KIOSK"
                     color: root.cyan
                     font.family: root.mono
-                    font.pixelSize: Kirigami.Units.gridUnit * 0.8
+                    font.pixelSize: Kirigami.Units.gridUnit * 1.0
                 }
                 Text {
                     Layout.fillWidth: true
@@ -249,7 +252,7 @@ PlasmoidItem {
                     text: root.toolTipSubText.toUpperCase()
                     color: root.error !== "" ? root.amber : root.starlight
                     font.family: root.mono
-                    font.pixelSize: Kirigami.Units.gridUnit * 1.3
+                    font.pixelSize: Kirigami.Units.gridUnit * 1.6
                     font.bold: true
                 }
             }
@@ -286,7 +289,7 @@ PlasmoidItem {
                 text: "// PAGES"
                 color: root.cyan
                 font.family: root.mono
-                font.pixelSize: Kirigami.Units.gridUnit * 0.8
+                font.pixelSize: Kirigami.Units.gridUnit * 1.0
             }
 
             // a picture of each page, the last time it was on: click to jump there and stay
@@ -341,7 +344,7 @@ PlasmoidItem {
                                 text: root.title(tile.modelData)
                                 color: root.showing === tile.modelData ? root.cyan : root.starlight
                                 font.family: root.mono
-                                font.pixelSize: Kirigami.Units.gridUnit * 0.8
+                                font.pixelSize: Kirigami.Units.gridUnit * 1.0
                             }
                             Kirigami.Icon {
                                 visible: root.pinned === tile.modelData
@@ -392,7 +395,7 @@ PlasmoidItem {
                 text: "// TRANSITIONS · a change restarts the display"
                 color: root.cyan
                 font.family: root.mono
-                font.pixelSize: Kirigami.Units.gridUnit * 0.8
+                font.pixelSize: Kirigami.Units.gridUnit * 1.0
             }
 
             Flow {

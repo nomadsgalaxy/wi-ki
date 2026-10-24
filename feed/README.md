@@ -111,3 +111,6 @@ keeps them in `~/.cache/kiosk/thumbs/`) to jump to, Auto, Next and Settings (the
 transitions to turn on and off. Middle-click skips to the next page. The tray icon turns into a pin while a page is
 pinned. It only asks the kiosk anything while the popup is open.
 
+Plasma keeps a widget it has loaded, so after `install.sh` updates it, it only shows once plasmashell restarts
+(`systemctl --user restart plasma-plasmashell`).
+
