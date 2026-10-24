@@ -16,11 +16,11 @@ import kit
 from . import FPS
 from .canvas import WIDTH, HEIGHT, STRIDE, sprite
 
-# his performance, 5 s in all (no theme runs longer than johnny5): "I'M ESCAPING TO THE ONE PLACE" alone for
-# 0.85 s, "NOT CORRUPTED" 0.35 s, "BY CAPITALISM..." 0.3 s, then 0.8 s of withheld laughter, then he throws his head
-# back for SPACE!!!!
-LINES_AT = (0, .85, 1.2)  # seconds into his talking that each line of the banner comes up
-SPEAK = 1.5             # seconds he talks, through the three lines
+# his performance, 5 s in all (no theme runs longer than johnny5): a quick monologue, "I'M ESCAPING TO THE ONE PLACE"
+# alone for 0.5 s, "NOT CORRUPTED" 0.22 s, "BY CAPITALISM..." 0.23 s, then 1.35 s of withheld laughter with his whole
+# line up to read, then he throws his head back for SPACE!!!!
+LINES_AT = (0, .5, .72)  # seconds into his talking that each line of the banner comes up
+SPEAK = .95             # seconds he talks, through the three lines
 SHOUT_HOLD = .5         # seconds SPACE!!!! holds once it's formed, to be read
 BEATS = {"drop": .25, "rise": .25, "talk": None, "shout": None, "shake": .2, "launch": .95}   # talk and shout: below
 RED, ORANGE, GOLD, INK, PAPER = (204, 26, 26), (255, 120, 20), (255, 206, 40), (14, 12, 20), (248, 244, 232)
@@ -41,7 +41,7 @@ FIG_W, FIG_H = 255 * K, TALK_ART.height * K   # the box he's drawn in, a little 
 FIG_X, FIG_Y = 107, HEIGHT - FIG_H             # centred in the first panel
 SPEAKING = [11, 0, 1, 2, 6, 10, 0, 1, 2, 6, 4]   # the frames he talks through, in order: a smirk before he starts,
                                                  # his open-mouthed frames, and his straight face (4) to finish
-LAUGH = [(11, .14), (5, .09), (11, .12), (5, .09), (11, .16), (3, .2)]   # each flip is 2+ frames: a blend, then the pose   # (frame, seconds): withheld laughter, the smirk
+LAUGH = [(11, .24), (5, .15), (11, .2), (5, .15), (11, .27), (3, .34)]   # each flip is 2+ frames: a blend, then the pose   # (frame, seconds): withheld laughter, the smirk
                                                  # breaking into a grin and back, twice, then nearly bursting
 LOOKING = [(7, .1), (8, .1), (9, .1)]          # then his head goes back: eyes up, looking up, and the grin he shouts with
 SCRIPT = [(f, SPEAK / len(SPEAKING)) for f in SPEAKING] + LAUGH + LOOKING   # all of it, (frame, seconds)
@@ -382,11 +382,11 @@ def check():
     assert len({step[4] for step in SHOUT_STEPS}) == len(SHOUT_STEPS), "every step of the shout is a step"
     from .canvas import Canvas
     size = WIDTH * HEIGHT * 2
-    # his timing: the first line alone for most of a second (six words), the next two a third of a second each, nearly
-    # a second holding in his laughter with all of it up, the shout formed for half a second, 5 s in all; STILL claims
-    # no more than the holds
-    assert LINES_AT[0] == 0 and LINES_AT[1] >= .8 and all(b - a >= .3 for a, b in zip(LINES_AT[1:], LINES_AT[2:] + (SPEAK,)))
-    assert abs(sum(t for _, t in LAUGH) - .8) < .05, "his withheld laughter, 0.8 s"
+    # his timing: a quick monologue (the first line alone for half a second, the next two about a fifth each), then the
+    # longest beat, holding in his laughter with all of it up, the shout formed for half a second, 5 s in all; STILL
+    # claims no more than the holds
+    assert LINES_AT[0] == 0 and LINES_AT[1] >= .5 and all(b - a >= .2 for a, b in zip(LINES_AT[1:], LINES_AT[2:] + (SPEAK,)))
+    assert abs(sum(t for _, t in LAUGH) - 1.35) < .05 and sum(t for _, t in LAUGH) > SPEAK, "his withheld laughter, longer than his line"
     assert SHOUT_HOLD >= .5, "time to read SPACE!!!!"
     assert STILL <= BEATS["talk"] + SHOUT_HOLD and abs(SECONDS - 5) < .05, "5 s, johnny5's length"
     # the flame never lands on the poster in his panel's columns: every frame, drawn with and without it, may only
