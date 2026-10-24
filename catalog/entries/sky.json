@@ -3,7 +3,9 @@
  "kind": "page",
  "home": "public",
  "about": "sunrise, sunset and the day's light, the planets and constellations you can see tonight, the clouds, and the moon",
- "found": {},
+ "found": {
+  "main": "3c00f1"
+ },
  "shapes": [
   "bar"
  ],

@@ -11,6 +11,8 @@ canvas.py):
   matrix         a curtain of green code rain falls and leaves the new page behind it
   hackerman      a neon terminal hacks time while the new page glitches in
   johnny5        Johnny-5 rolls in, needs input, and scans the new page in with his eyes
+  pacman         Pac-Man chomps the dots along three lanes, and the new page is there wherever he's been
+  tetris         blocks hard-drop and lock in, and each line that fills clears to the new page, bottom up
 
 kiosk.py calls play() whenever the page changes. The themes take turns, in ORDER, leaving out any listed in
 ~/.config/kiosk/transitions-off.json (deploy/kiosk-config sets it). A kiosk has the ones it's installed (packs.py):
@@ -138,7 +140,7 @@ def check():
     # since a theme failing partway is caught and it lands on the new page anyway. A lone frame is the transition's
     # first (t=0), never the finished page: play() is what ends on the new page.
     # not johnny5: its last frame is always the new page, even when it's the only one
-    for name in [n for n in ("hackerman", "hive76", "matrix", "nomadsgalaxy", "coreone") if n in THEMES]:
+    for name in [n for n in ("hackerman", "hive76", "matrix", "nomadsgalaxy", "coreone", "pacman", "tetris") if n in THEMES]:
         for count in (1, 2):
             c, shown = Canvas(bytearray(old), new), []
             for _ in THEMES[name].frames(c, count):
