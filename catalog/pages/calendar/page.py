@@ -27,7 +27,7 @@ CELL_W = (SCREEN[0] - 2 * MARGIN) // COLUMNS
 CELL_H = (SCREEN[1] - TOP - 8) // (DAYS // COLUMNS)
 CELL, WEEKEND = (20, 23, 31), (22, 30, 48)        # weekends are tinted blue, so they stand out as they come up
 WEEKEND_RULE, WEEKEND_TEXT = (52, 72, 112), (150, 190, 240)
-SHOWN = 2   # events a day has room for; more than that become "+N more"
+SHOWN = 2   # lines a day has room for at the events' size; events that don't get one become "+N more"
 BLINK = [packed(Image.new("RGB", (16, 32), c)) for c in (O, BG)]
 
 
@@ -94,6 +94,23 @@ def fit(title, room):
     return cut.rstrip() + "…"
 
 
+def wrap(title, first, room, lines):
+    """title in at most lines lines: the first first characters wide (after the time), the rest room wide (the whole
+    day). Breaks between words, splits a word only when it's wider than a line, and the last line says it was cut."""
+    out, words = [], title.split()
+    while words and len(out) < lines:
+        width = first if not out else room
+        line = ""
+        while words and len(line) + bool(line) + len(words[0]) <= width:
+            line += (" " if line else "") + words.pop(0)
+        if not line:   # a word wider than the line: as much of it as fits
+            line, words[0] = words[0][:width], words[0][width:]
+        out.append(line)
+    if words and out:   # more than fits: the last line is cut, with an ellipsis
+        out[-1] = fit(out[-1] + " " + " ".join(words), first if len(out) == 1 else room)
+    return out
+
+
 def draw(now, events, forecast=None, title=None):
     """the whole page, 1920x515 RGB"""
     img = Image.new("RGB", SCREEN, BG); d = ImageDraw.Draw(img)
@@ -129,14 +146,20 @@ def draw(now, events, forecast=None, title=None):
             text(img, (x1 - 10, y0 + 60), f"{round(hi)}°", warmth(hi), scale=1, right=True)
             text(img, (x1 - 10, y0 + 78), f"{round(lo)}°", warmth(lo), scale=1, right=True)
 
-        # the events, one line each: the time in orange (all-day ones in blue), then the title
+        # the events: the time in orange (all-day ones in blue), then the title, wrapped onto the day's next line when
+        # there's one to spare; every event that's shown keeps at least one line
         evs = events.get(day, [])
         y, room = y0 + 112, (x1 - x0 - 20) // 16          # characters across a day at scale 2 (15)
-        for e in evs[:SHOWN]:
+        shown = evs[:SHOWN]
+        left = SHOWN
+        for n, e in enumerate(shown):
             when = "" if e["_all_day"] else hour(e["_start"]) + " "
+            lines = wrap(str(e.get("title", "")), room - len(when), room, left - (len(shown) - n - 1))
             text(img, (x0 + 12, y), when, O)
-            text(img, (x0 + 12 + 16 * len(when), y), fit(str(e.get("title", "")), room - len(when)), C if e["_all_day"] else W)
-            y += 36
+            for k, line in enumerate(lines):
+                text(img, (x0 + 12 + (16 * len(when) if k == 0 else 0), y), line, C if e["_all_day"] else W)
+                y += 36
+            left -= len(lines)
         if len(evs) > SHOWN:
             text(img, (x0 + 12, y + 2), f"+{len(evs) - SHOWN} more", DIM, scale=1)
     return img
@@ -201,6 +224,17 @@ def _check(folder):
     assert (CELL_W - 6 - 20) // 16 >= len("7p Member Night"), "a Member Night fits on one line"
     assert fit("Members Meeting", 15 - len("7:30p ")) == "Members…" and fit("Open House", 9) == "Open…", "cut at a word"
     assert fit("Supercalifragilistic", 9) == "Supercal…" and fit("Open House", 10) == "Open House"
+    # wrapping: the rest of a title goes on the day's next line, the whole day wide, and only what doesn't fit is cut
+    assert wrap("Hive76 Open House", 9, 15, 2) == ["Hive76", "Open House"]
+    assert wrap("Hive76 Open House", 9, 15, 1) == ["Hive76…"], "one line: cut as before"
+    assert wrap("Intro to Arduino and Microcontroller Programming", 9, 15, 2) == ["Intro to", "Arduino and…"]
+    assert wrap("Member Night", 12, 15, 2) == ["Member Night"], "it only wraps when it has to"
+    assert wrap("Supercalifragilistic", 9, 15, 2) == ["Supercali", "fragilistic"], "a word too wide is split"
+    assert wrap("", 9, 15, 2) == [] and wrap("Open House", 9, 15, 0) == []
+    for title in ("Intro to Arduino and Microcontroller Programming", "a b c d e f g h i j k l m n o p", "x" * 80):
+        for lines in (1, 2):
+            got = wrap(title, 9, 15, lines)
+            assert len(got) <= lines and len(got[0]) <= 9 and all(len(l) <= 15 for l in got[1:]), (title, lines, got)
     for bad in ({"daily": []}, {"daily": {"time": ["2026-10-14"]}}, {"daily": {**FORECAST["daily"], "time": ["soon"]}},
                 {"daily": {**FORECAST["daily"], "weather_code": [0]}}, {"daily": {**FORECAST["daily"], "temperature_2m_max": ["hot"] * 14}},
                 [], "weather"):
