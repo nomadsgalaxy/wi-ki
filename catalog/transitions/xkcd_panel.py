@@ -18,6 +18,7 @@ from .canvas import WIDTH, HEIGHT, STRIDE
 
 SECONDS = 5
 IN, PRINTED, OUT = 0.10, 0.24, 0.88           # the sheet's down, the comic's printed, the sheet starts going up
+STILL = (OUT - PRINTED) * SECONDS             # seconds it holds still, to be read
 API = "https://xkcd.com/{}info.0.json"
 PICTURES = "https://imgs.xkcd.com/comics/"
 UA = {"User-Agent": "wi-ki xkcd_panel (github.com/nomadsgalaxy/wi-ki)"}
