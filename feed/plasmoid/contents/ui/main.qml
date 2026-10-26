@@ -147,6 +147,8 @@ PlasmoidItem {
                     root.waiting = false;
                     if (data["exit code"] !== 0) {
                         root.error = failed || i18n("The kiosk said no");
+                    } else if (out !== "ok") {
+                        root.error = out;   // done, with something to say (a render server that didn't take an update)
                     }
                     if (ask.startsWith("transition ")) {
                         root.ask("transitions");

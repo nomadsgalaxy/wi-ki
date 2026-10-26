@@ -84,9 +84,11 @@ def version(state=STATE):
     except ValueError:
         seen = {}
     seen = seen if isinstance(seen, dict) else {}
-    behind = seen.get("behind")
-    return {"commit": text("applied-commit")[:7] or None, "latest": str(seen.get("latest") or "")[:7] or None,
-            "behind": behind if isinstance(behind, int) else None, "refused": text("refused-commit")[:7] or None}
+    behind, latest, refused = seen.get("behind"), str(seen.get("latest") or ""), text("refused-commit")
+    return {"commit": text("applied-commit")[:7] or None, "latest": latest[:7] or None,
+            "behind": behind if isinstance(behind, int) else None,
+            # autoupdate never clears it, so only while it's still the newest it's seen; a later commit supersedes it
+            "refused": refused[:7] if refused and refused == latest else None}
 
 
 def run(args, cache=CACHE, playlist=PLAYLIST, off=OFF, dirs=THEMES, restart=restart):
@@ -275,6 +277,8 @@ def check():
     open(os.path.join(state, "fetched.json"), "w").write(json.dumps({"latest": "b" * 40, "behind": 2}))
     open(os.path.join(state, "refused-commit"), "w").write("b" * 40 + "\n")
     assert version(state) == {"commit": "a" * 7, "latest": "b" * 7, "behind": 2, "refused": "b" * 7}
+    open(os.path.join(state, "fetched.json"), "w").write(json.dumps({"latest": "c" * 40, "behind": 0}))
+    assert version(state)["refused"] is None, "a newer commit since: the refusal's history"
     open(os.path.join(state, "fetched.json"), "w").write("[not")
     assert version(state)["latest"] is None and version(state)["behind"] is None
     open(os.path.join(state, "fetched.json"), "w").write("[1]")
