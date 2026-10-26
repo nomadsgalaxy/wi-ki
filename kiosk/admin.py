@@ -1734,7 +1734,7 @@ def check():
         assert post("/transitions", {"t_snow": "on"})[0] == 303 and json.load(open(f"{served}/conf/transitions-off.json")) == ["rain"]
         assert post("/pages", {"action": "add", "page": "nope"})[0] == 400
         assert post("/install", {"action": "catalog", "kind": "transition", "name": "rain"})[0] == 303
-        assert json.load(open(f"{served}/conf/packs-request.json"))["name"] == "rain", "the server installs it, where pages run"
+        assert json.load(open(f"{served}/.config/kiosk/packs-request.json"))["name"] == "rain", "the server installs it, where pages run"
         assert json.load(open(PACKS_REQUEST))["name"] == "rain", "and the Pi too, which plays transitions"
         os.remove(PACKS_REQUEST)
         listener.close()
