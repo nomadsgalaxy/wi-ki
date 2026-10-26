@@ -140,13 +140,41 @@ def drifter():
 
 
 _drifter = []
+LOGO = os.path.expanduser("~/.config/kiosk/logo.png")   # a kiosk's own logo for its pages, in place of the Drifter
+
+
+def logo(path=None):
+    """the 64 px mark at the top left of a page: this kiosk's own logo.png (a club's or a shop's), fitted into the
+    square and centred, or the Drifter at 2x, so it stays pixel art"""
+    try:
+        own = Image.open(path or LOGO)
+        if own.width * own.height > 4096 * 4096:
+            raise ValueError("too big for a logo")
+        own = own.convert("RGBA"); own.thumbnail((64, 64), Image.LANCZOS)
+        out = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        out.paste(own, ((64 - own.width) // 2, (64 - own.height) // 2))
+        return out
+    except (OSError, ValueError, Image.DecompressionBombError):   # none, or not a picture: the Drifter
+        return drifter().resize((64, 64), Image.NEAREST)
+
+
+def check_logo():
+    """a kiosk's own logo, fitted and centred, whatever its shape; anything else is the Drifter"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        Image.new("RGBA", (256, 128), (246, 145, 31, 255)).save(f"{d}/wide.png")
+        wide = logo(f"{d}/wide.png")
+        assert wide.size == (64, 64) and wide.getbbox() == (0, 16, 64, 48), wide.getbbox()
+        open(f"{d}/junk.png", "w").write("not a picture")
+        drift = drifter().resize((64, 64), Image.NEAREST).tobytes()
+        assert logo(f"{d}/junk.png").tobytes() == logo(f"{d}/none.png").tobytes() == drift, "no logo, or a broken one: the Drifter"
 
 
 def masthead(img, now, kicker, title, note=None):
-    """the top of a desktop page: the Drifter (at 2x, so it stays pixel art), a ship's-log kicker and the title, the
-    clock and the feed's age on the right, and the hairline under it all"""
+    """the top of a desktop page: the kiosk's logo (the Drifter, unless it has its own), a ship's-log kicker and the
+    title, the clock and the feed's age on the right, and the hairline under it all"""
     if not _drifter:
-        _drifter.append(drifter().resize((64, 64), Image.NEAREST))
+        _drifter.append(logo())
     img.paste(_drifter[0], (24, 12), _drifter[0])
     text(img, (104, 14), kicker, O, scale=1)
     text(img, (104, 32), title, W, scale=3)
