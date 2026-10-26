@@ -121,6 +121,10 @@ it. On a kiosk drawn by a render server, you pair with the Pi, and it passes eve
 shared keys slow down after five, like logins. A kiosk set up before this can get one from the setup page's login
 form, or over SSH with `python3 -I ~/kiosk/pairing.py --set` (it reads the key from stdin).
 
+In the widget, the screens you've paired with are along the top. Once there's one, it picks that one; the **Default**
+chip goes back to the screen in `~/.config/kiosk-ctl`, if `install.sh` wrote one. A kiosk that comes back at a new
+address keeps the certificate it paired with: if it's changed, `pair` stops and asks you to check the fingerprint.
+
 `control.py` checks the page against the playlist and writes `~/.cache/kiosk/control.json`, and `kiosk.py` picks it up
 within a quarter second. A pinned page starts over every time its seconds run out, so the weather still refreshes.
 

@@ -28,6 +28,7 @@ CLONE, LIVE = f"{HOME}/wi-ki", f"{HOME}/kiosk"
 OLD_CLONE = f"{HOME}/HiveKiosk"   # the clone's name until October 2026: moved to CLONE on the next run
 STATE = f"{HOME}/.cache/kiosk"
 APPLIED, REFUSED = f"{STATE}/applied-commit", f"{STATE}/refused-commit"
+FETCHED = f"{STATE}/fetched.json"   # the latest it's seen on GitHub and how far behind that is, for control.py's status
 UNITS = "/etc/systemd/system"
 AVAHI = "/etc/avahi/services/wi-ki.service"   # so the Desk Kiosk widget can find it (pairing.py find)
 # a kiosk can follow another branch, to try something first; ~/.config is outside ~/kiosk, so updates keep it
@@ -80,9 +81,20 @@ def assemble(repo, dest, only=None):
         shutil.copytree(f"{repo}/catalog/landscapes", f"{dest}/landscapes", ignore=skip)
 
 
+def fetched(latest):
+    """what control.py's status says about updates, worked out here when it fetches, so status needn't run git"""
+    applied = read(APPLIED)
+    try:
+        behind = int(kiosk("git", "rev-list", "--count", f"{applied}..{latest}")) if applied else None
+    except (subprocess.CalledProcessError, ValueError):   # what it applied isn't in main's history any more
+        behind = None
+    write(FETCHED, json.dumps({"latest": latest, "behind": behind}))
+
+
 def update():
     kiosk("git", "fetch", "--quiet", "origin", BRANCH)
     new = kiosk("git", "rev-parse", f"origin/{BRANCH}")
+    fetched(new)
     if new == read(APPLIED):
         return log(f"up to date ({new[:7]})")
     if new == read(REFUSED):
@@ -135,6 +147,7 @@ def update():
     # the Pi's login loop brings it back in 3 s, and on a render server systemd does, which runs it as /usr/bin/python3
     subprocess.run(["pkill", "-f", f"(^|/)python3 -I {LIVE}/kiosk.py"])
     write(APPLIED, new)
+    fetched(new)
     log(f"applied {new[:7]}: {subject}")
 
 

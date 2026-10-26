@@ -216,6 +216,10 @@ def pair(address, get_key, name, want=None, keyfile=KEYFILE, screens=SCREENS):
         offer = ask(c, "GET", "/pair")
         if not re.fullmatch(r"k-[0-9a-f]{6}", str(offer.get("id"))):
             raise ValueError("that kiosk didn't say its card ID")
+        known = screen_files(screens).get(offer["id"], {}).get("pin")
+        if known and known != pin and not want:   # the same kiosk at a new address keeps its certificate
+            raise ValueError(f"{offer['id']} was paired with certificate {known}, and this one is {pin}: check the "
+                             "fingerprint on its screen, then pair with --fingerprint")
         key = derive(text, offer["salt"], offer["n"], offer["r"], offer["p"])
         ask(c, "POST", "/pair", {"key": pubkey, "name": name, "nonce": offer["nonce"], "proof": proof(key, offer["nonce"], pubkey, name)})
     finally:
@@ -242,7 +246,11 @@ def prompt(address, pin):
 
 def find():
     """the kiosks advertising _wi-ki._tcp nearby (autoupdate's wi-ki.service for Avahi), IPv4 only, like the setup page"""
-    out = subprocess.run(["avahi-browse", "-rpt", SERVICE], capture_output=True, text=True, timeout=15).stdout
+    try:
+        out = subprocess.run(["avahi-browse", "-rpt", SERVICE], capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"pairing: can't look for kiosks nearby (avahi-browse: {e})", file=sys.stderr)
+        return []
     return list({s["address"]: s for s in map(found, out.splitlines()) if s}.values())
 
 
