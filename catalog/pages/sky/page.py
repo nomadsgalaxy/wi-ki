@@ -11,8 +11,9 @@ and constellation lines are d3-celestial's (stars.json, BSD 3-Clause). The cloud
 fetched every half hour into a cache every renderer on the machine shares (kit.Simple); they dim the sky as much as
 they would. Without them the page still draws, just clear.
 
-Options (in playlist.json, or the setup page's Location): lat and lon (default: central Philadelphia), and place, for
-the heading.
+Options (in playlist.json, or the setup page's Location): lat and lon (default: central Philadelphia), place, for
+the heading, and facing, the way the middle of the screen looks: sun (the default: south, or north in the southern
+hemisphere, so the sun crosses the middle), north or south. Facing north, east is on the right, as you'd see it.
 """
 import json, math, os, time, urllib.parse, urllib.request
 from datetime import datetime, timedelta
@@ -240,8 +241,10 @@ class Page(Simple):
     clean = staticmethod(clean)
     _days = {}   # (date, lat, lon) -> the day worked out: it only changes with the date
 
-    def __init__(self, lat=39.95, lon=-75.17, place=None):
+    def __init__(self, lat=39.95, lon=-75.17, place=None, facing="sun"):
         self.lat, self.lon = max(-90.0, min(90.0, float(lat))), (float(lon) + 180) % 360 - 180
+        # the bearing in the middle of the screen: the way the sun goes (south, or north in the southern hemisphere)
+        self.middle = {"north": 0, "south": 180}.get(facing, 0 if self.lat < 0 else 180)
         self.place, self.sunspot, self.behind, self.city = place, None, None, None
 
     def fetch(self):
@@ -267,8 +270,7 @@ class Page(Simple):
     def spot(self, ts, ra, dec):
         """something at ra and dec, on the screen at Unix time ts -> (x, y, its height above the horizon)"""
         up, bearing = sky_place(ts, ra, dec, self.lat, self.lon)
-        middle = 0 if self.lat < 0 else 180   # face the way the sun goes: south, or north in the southern hemisphere
-        return (bearing - middle + 180) % 360 * PX, HORIZON - up * PX, up
+        return (bearing - self.middle + 180) % 360 * PX, HORIZON - up * PX, up
 
     def planets(self, ts):
         """the planets up at Unix time ts that you could see then -> [(name, x, y, height, bearing)], highest first"""
@@ -365,7 +367,7 @@ class Page(Simple):
             part = img.crop((0, TOP, w, HORIZON))
             grey = (210, 214, 222) if sun_up > 0 else (34, 36, 48)
             img.paste(Image.blend(part, Image.new("RGB", part.size, grey), cover / 100 * 0.55), (0, TOP))
-        self.city = town(img, sun_up, 0 if self.lat < 0 else 180)
+        self.city = town(img, sun_up, self.middle)
         for name, x, y in named:
             text(img, (round(x) + 8, round(y) - 6), name, SHADE[name], scale=1)
         # the sun, where it is: moving() draws it, so it can shine
@@ -502,6 +504,11 @@ def check():
     page = Page(39.95, -75.17)
     x, y, up = page.spot(utc(2026, 10, 19, 1), 37.95, 89.26)
     assert (x < 20 or x > SCREEN[0] - 20) and abs(y - (HORIZON - 39.95 * PX)) < 3 * PX, (x, y)
+    north = Page(39.95, -75.17, facing="north")   # facing north: Polaris in the middle, the east to its right
+    x, _, _ = north.spot(utc(2026, 10, 19, 1), 37.95, 89.26)
+    assert abs(x - SCREEN[0] / 2) < 20, x
+    assert north.spot(utc(2026, 10, 19, 1), 37.95, 89.26)[1] == page.spot(utc(2026, 10, 19, 1), 37.95, 89.26)[1], "just as high"
+    assert Page(-33.9, 151.2).middle == 0 and Page(-33.9, 151.2, facing="south").middle == 180 and Page(39.95, -75.17, facing="up").middle == 180
     assert shade(30) == (SKY[0][1], SKY[0][2]) and shade(-30) == (SKY[-1][1], SKY[-1][2]) and shade(-3) != shade(3)
     assert len(STARMAP["stars"]) > 800 and len(STARMAP["lines"]) == 88 and STARMAP["stars"][0][2] < 0, "Sirius first"
     sky = lambda when: Page.showing(None).picture(when, None, safe=False).crop((0, 200, SCREEN[0], HORIZON - 166))   # over the towers
