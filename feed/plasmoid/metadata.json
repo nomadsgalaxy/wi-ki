@@ -13,7 +13,7 @@
         "Id": "org.wiki.deskkiosk",
         "License": "MIT",
         "Name": "Desk Kiosk",
-        "Version": "2.1"
+        "Version": "2.2"
     },
     "X-Plasma-API": "declarativeappletscript",
     "X-Plasma-API-Minimum-Version": "6.0",

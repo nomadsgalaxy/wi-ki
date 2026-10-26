@@ -186,8 +186,6 @@ def connect(address, want=None, screens=SCREENS):
     if expected and expected != seen:
         c.close()
         raise ValueError(f"{address}'s certificate is {seen}, not {expected}: check the fingerprint on its screen")
-    if not expected:
-        print(f"{address}'s certificate: {seen}\n(it should match the fingerprint on the kiosk's screen)", file=sys.stderr)
     return c, seen
 
 
@@ -206,12 +204,15 @@ def own_key(path=KEYFILE):
     return " ".join(open(path + ".pub").read().split()[:2])
 
 
-def pair(address, text, name, want=None, keyfile=KEYFILE, screens=SCREENS):
-    """pair with the kiosk at address -> its card ID; writes ~/.config/kiosk-ctl.d/<card id> for kiosk-ctl"""
-    shared(text)   # say so now if it can't be one, before asking the kiosk anything
+def pair(address, get_key, name, want=None, keyfile=KEYFILE, screens=SCREENS):
+    """pair with the kiosk at address -> its card ID; writes ~/.config/kiosk-ctl.d/<card id> for kiosk-ctl.
+    get_key(fingerprint) asks for the shared key once the kiosk's certificate is known, so whoever types it can check
+    that against the kiosk's screen first."""
     pubkey = own_key(keyfile)
     c, pin = connect(address, want, screens)
     try:
+        text = get_key(pin)
+        shared(text)   # say so now if it can't be one, before telling the kiosk anything
         offer = ask(c, "GET", "/pair")
         if not re.fullmatch(r"k-[0-9a-f]{6}", str(offer.get("id"))):
             raise ValueError("that kiosk didn't say its card ID")
@@ -221,6 +222,22 @@ def pair(address, text, name, want=None, keyfile=KEYFILE, screens=SCREENS):
         c.close()
     write_private(os.path.join(screens, offer["id"]), f"host=kiosk@{address.partition(':')[0]}\nsetup=https://{address}\npin={pin}\n")
     return offer["id"]
+
+
+def prompt(address, pin):
+    """the shared key, from KIOSK_PAIR_KEY, the terminal, or (for the widget, which has neither) a KDE password box;
+    never on a command line, where anything on the computer could read it"""
+    if os.environ.get("KIOSK_PAIR_KEY"):
+        return os.environ["KIOSK_PAIR_KEY"]
+    words = f"{address}'s certificate is\n{pin}\nCheck it matches the kiosk's screen, then type the shared key."
+    if sys.stdin.isatty():
+        import getpass
+        print(words, file=sys.stderr)
+        return getpass.getpass("Shared key: ")
+    got = subprocess.run(["kdialog", "--title", "Pair with a kiosk", "--password", words], capture_output=True, text=True)
+    if got.returncode:
+        raise ValueError("cancelled")
+    return got.stdout.rstrip("\n")
 
 
 def find():
@@ -318,11 +335,10 @@ if __name__ == "__main__":
         for s in find():
             print(json.dumps(s))
     elif len(args) >= 2 and args[0] == "pair":
-        import getpass, socket
+        import socket
         want = args[args.index("--fingerprint") + 1] if "--fingerprint" in args else None
-        text = os.environ.get("KIOSK_PAIR_KEY") or getpass.getpass("Shared key: ")
         try:
-            print(f"paired with {pair(args[1], text, re.sub(r'[^A-Za-z0-9._@-]', '-', f'{os.environ.get('USER', 'me')}@{socket.gethostname()}')[:40], want)}")
+            print(f"paired with {pair(args[1], lambda pin: prompt(args[1], pin), re.sub(r'[^A-Za-z0-9._@-]', '-', f'{os.environ.get('USER', 'me')}@{socket.gethostname()}')[:40], want)}")
         except (OSError, ValueError, KeyError) as e:
             sys.exit(f"pairing: {e}")
     else:
