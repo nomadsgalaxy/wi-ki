@@ -442,11 +442,11 @@ def by_ip():
                         csrf = re.search(r'name=csrf value="([^"]+)"', form).group(1)
                         mine = "correct-horse-" + os.urandom(4).hex()
                         a = call(https, "POST", "/change", ip_host, headers={"Origin": f"https://{ip_host}"},
-                                 form={"csrf": "not-it", "user": "owner", "password": mine, "again": mine},
+                                 form={"csrf": "not-it", "user": "owner", "password": mine, "again": mine, "pairing": "open sesame now"},
                                  cookies={"__Host-kiosk": first})
                         assert a.status in (303, 403) and not os.path.exists(login), "a wrong CSRF token changes nothing"
                         a = call(https, "POST", "/change", ip_host, headers={"Origin": f"https://{ip_host}"},
-                                 form={"csrf": csrf, "user": "owner", "password": mine, "again": mine},
+                                 form={"csrf": csrf, "user": "owner", "password": mine, "again": mine, "pairing": "open sesame now"},
                                  cookies={"__Host-kiosk": first})
                         if stays:   # by IP is still on, so this connection carries on, with a new session
                             assert a.status == 303 and a.set.get("__Host-kiosk") not in (None, "", first), (a.status, a.set)
@@ -500,14 +500,14 @@ def by_ip():
                 before = open(login).read()
                 new = "a-brand-new-one-" + os.urandom(3).hex()
                 for current, why in ((None, "without the current password"), ("not-it", "with the wrong current password")):
-                    fields = {"csrf": csrf, "user": "owner", "password": new, "again": new}
+                    fields = {"csrf": csrf, "user": "owner", "password": new, "again": new, "pairing": "open sesame now"}
                     if current is not None:
                         fields["current"] = current
                     a = call(https, "POST", "/change", ip_host, headers={"Origin": f"https://{ip_host}"}, form=fields,
                              cookies={"__Host-kiosk": session})
                     assert a.status in (400, 403) and open(login).read() == before, f"the password changed {why}"
                 a = call(https, "POST", "/change", ip_host, headers={"Origin": f"https://{ip_host}"},
-                         form={"csrf": csrf, "current": mine, "user": "owner", "password": new, "again": new},
+                         form={"csrf": csrf, "current": mine, "user": "owner", "password": new, "again": new, "pairing": "open sesame now"},
                          cookies={"__Host-kiosk": session})
                 assert a.status == 303 and open(login).read() != before, "and with it, it changes"
             finally:
@@ -539,7 +539,7 @@ def by_ip():
             def change_now(port, host, session, current, new):
                 form = call(port, "GET", "/change", host, cookies={"__Host-kiosk": session}).body
                 csrf = re.search(r'name=csrf value="([^"]+)"', form).group(1)
-                fields = {"csrf": csrf, "user": "owner", "password": new, "again": new}
+                fields = {"csrf": csrf, "user": "owner", "password": new, "again": new, "pairing": "open sesame now"}
                 if current is not None:
                     fields["current"] = current
                 return call(port, "POST", "/change", host, headers={"Origin": f"https://{host}"}, form=fields,
@@ -631,7 +631,7 @@ def by_ip():
                     admin.State.session = fickle
                     new = "x" if short else "long-enough-new-" + os.urandom(3).hex()
                     a = answered(https, "POST", "/change", ip_host, headers={"Origin": f"https://{ip_host}"},
-                                 form={"csrf": csrf, "current": mine, "user": "owner", "password": new, "again": new},
+                                 form={"csrf": csrf, "current": mine, "user": "owner", "password": new, "again": new, "pairing": "open sesame now"},
                                  cookies={"__Host-kiosk": session})
                     assert a == 303, f"a session gone mid-change ({'with' if short else 'without'} a form problem): {a}"
                     assert admin.password_ok(mine, json.load(open(login))), "and nothing changed"
