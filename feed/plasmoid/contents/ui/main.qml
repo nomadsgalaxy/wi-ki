@@ -4,7 +4,10 @@
  * Click it for what's on the kiosk now, a picture of every page in its rotation (the last time each was on screen) to
  * jump to, Auto, Next, Update and the setup page, and the transitions to turn on and off. Middle-click skips to the
  * next page. Along the top: the screens this computer has paired with, to pick one, and the ones nearby to pair with
- * (kiosk-ctl pair asks for the shared key in a box of its own, so it's never on a command line).
+ * (kiosk-ctl pair asks for the shared key in a box of its own, so it's never on a command line). Manage swaps the
+ * pictures for the kiosk's settings: the rotation (on and off, order, seconds, add and remove), the catalog's pages and
+ * transitions to subscribe to (install) or drop, and the location; each is one kiosk-ctl command, checked by the
+ * kiosk with the setup page's own rules. A page's own settings stay on the setup page.
  *
  * The work lives in kiosk-ctl (feed/kiosk-ctl in the Wi-Ki repo, linked into ~/.local/bin). This only runs it:
  * `status` when the popup opens and every few seconds while it's open, `thumbs` and `transitions` when it opens (and
@@ -45,6 +48,8 @@ PlasmoidItem {
     property var nearby: []        // {name, address, id, ...}, from kiosk-ctl screens
     property string pairing: ""    // the address it's pairing with, while it is
     readonly property string chosen: Plasmoid.configuration.screen
+    property bool managing: false
+    property var cfg: ({})         // from kiosk-ctl config, while managing
     // the popup's unit: Plasma's own on a big screen, smaller on a laptop, so it fits in about half the width and
     // most of the height (64 units across, about 44 down with a full rotation)
     readonly property real u: Kirigami.Units.gridUnit * Math.min(1, Screen.desktopAvailableWidth * 0.55 / (64 * Kirigami.Units.gridUnit),
@@ -132,6 +137,8 @@ PlasmoidItem {
                     const t = JSON.parse(out);
                     root.themes = t.all;
                     root.off = t.off;
+                } else if (ask === "config") {
+                    root.cfg = JSON.parse(out);
                 } else if (ask === "setup") {
                     Qt.openUrlExternally(out);
                 } else {
@@ -143,6 +150,9 @@ PlasmoidItem {
                     }
                     if (ask.startsWith("transition ")) {
                         root.ask("transitions");
+                    }
+                    if (root.managing) {
+                        root.ask("config");
                     }
                     statusSoon.restart();
                 }
@@ -158,7 +168,7 @@ PlasmoidItem {
 
     function pick(id) {
         Plasmoid.configuration.screen = id;
-        root.pages = []; root.showing = ""; root.pinned = ""; root.thumbs = {}; root.themes = []; root.version = {};
+        root.pages = []; root.showing = ""; root.pinned = ""; root.thumbs = {}; root.themes = []; root.version = {}; root.cfg = {};
         root.waiting = false;
         refresh();
     }
@@ -197,6 +207,23 @@ PlasmoidItem {
         ask("status");
         ask("thumbs");
         ask("transitions");
+        if (root.managing) {
+            ask("config");
+        }
+    }
+
+    onManagingChanged: if (managing) ask("config")
+
+    function entries(kind) {
+        return (root.cfg.catalog || []).filter(e => e.kind === kind);
+    }
+
+    function installed(e) {
+        return ((root.cfg.present || {})[e.kind + "s"] || []).indexOf(e.name) >= 0;
+    }
+
+    function inRotation(name) {
+        return (root.cfg.playlist || []).some(p => p.page === name);
     }
 
     Component.onCompleted: ask("status")
@@ -214,6 +241,14 @@ PlasmoidItem {
         running: root.expanded
         repeat: true
         onTriggered: root.ask("status")
+    }
+
+    // while an install is being carried out (packs.py), see when it's done
+    Timer {
+        interval: 5000
+        running: root.expanded && root.managing && (root.cfg.status || {}).state === "working"
+        repeat: true
+        onTriggered: root.ask("config")
     }
 
     Timer {
@@ -251,6 +286,7 @@ PlasmoidItem {
         property string label
         property bool lit: false
         property bool usable: !root.waiting
+        readonly property bool hovered: hover.containsMouse
         signal pressed()
 
         implicitHeight: root.u * 2.6
@@ -277,6 +313,149 @@ PlasmoidItem {
             enabled: button.usable
             cursorShape: Qt.PointingHandCursor
             onClicked: button.pressed()
+        }
+    }
+
+    component Kicker: Text {   // a section's heading, in the pages' ship's-log style
+        color: root.cyan
+        font.family: root.mono
+        font.pixelSize: root.u * 1.0
+    }
+
+    // the kiosk's settings: the setup page's Pages, Install and Location tabs, as kiosk-ctl commands
+    component Manage: ColumnLayout {
+        spacing: Kirigami.Units.smallSpacing
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            visible: text !== ""
+            text: root.cfg.locked ? i18n("Its render server keeps these settings, and this kiosk hasn't the key to change them.")
+                : (root.cfg.status || {}).state === "working" ? i18n("Working on it…")
+                : (root.cfg.status || {}).message || ""
+            color: root.amber
+            font.family: root.mono
+            font.pixelSize: root.u * 0.9
+        }
+
+        Kicker { text: "// ROTATION · in order; a change restarts the display" }
+        Repeater {
+            model: root.cfg.playlist || []
+
+            RowLayout {
+                id: row
+                required property var modelData
+                required property int index
+                readonly property bool on: modelData.on !== false
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                KioskButton {
+                    Layout.fillWidth: true
+                    label: (row.on ? "■ " : "□ ") + (row.modelData.name || root.title(row.modelData.page))
+                    lit: row.on
+                    usable: !root.waiting && !root.cfg.locked
+                    onPressed: root.send("page " + (row.on ? "off " : "on ") + row.index)
+                }
+                QQC2.SpinBox {
+                    from: 1; to: 3600
+                    value: row.modelData.seconds || 15
+                    editable: true
+                    enabled: !root.waiting && !root.cfg.locked
+                    implicitHeight: root.u * 2.6
+                    onValueModified: root.send("page seconds " + row.index + " " + value)
+                    QQC2.ToolTip.text: i18n("Seconds on screen")
+                    QQC2.ToolTip.visible: hovered
+                }
+                KioskButton {
+                    label: "▲"
+                    usable: !root.waiting && !root.cfg.locked && row.index > 0
+                    onPressed: root.send("page up " + row.index)
+                }
+                KioskButton {
+                    label: "▼"
+                    usable: !root.waiting && !root.cfg.locked && row.index < root.cfg.playlist.length - 1
+                    onPressed: root.send("page down " + row.index)
+                }
+                KioskButton {
+                    label: "✕"
+                    usable: !root.waiting && !root.cfg.locked && root.cfg.playlist.length > 1
+                    onPressed: root.send("page remove " + row.index)
+                }
+            }
+        }
+
+        Kicker { text: "// ADD TO THE ROTATION"; visible: addable.count > 0 }
+        Flow {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.smallSpacing
+            Repeater {
+                id: addable
+                model: root.entries("page").filter(e => e.usable && root.installed(e) && !root.inRotation(e.name))
+
+                KioskButton {
+                    required property var modelData
+                    label: "+ " + root.title(modelData.name)
+                    usable: !root.waiting && !root.cfg.locked
+                    onPressed: root.send("page add " + modelData.name)
+                    QQC2.ToolTip.text: modelData.about
+                    QQC2.ToolTip.visible: hovered
+                }
+            }
+        }
+
+        // the catalog: subscribe to (install) what it hasn't got, drop what it doesn't need. Installing restarts the display
+        Repeater {
+            model: [["page", "// PAGES IN THE CATALOG"], ["transition", "// TRANSITIONS IN THE CATALOG"]]
+
+            ColumnLayout {
+                id: section
+                required property var modelData
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Kicker { text: section.modelData[1] }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+                    Repeater {
+                        model: root.entries(section.modelData[0])
+
+                        KioskButton {
+                            id: pack
+                            required property var modelData
+                            readonly property bool have: root.installed(modelData)
+                            // what comes with every kiosk, and a page in the rotation, stay (take it out of the rotation first)
+                            readonly property bool kept: ((root.cfg.core || {})[modelData.kind + "s"] || []).indexOf(modelData.name) >= 0
+                                                         || root.inRotation(modelData.name)
+                            label: (have ? "✓ " : "+ ") + root.title(modelData.name) + (have ? "" : " · SUBSCRIBE")
+                            lit: have
+                            usable: !root.waiting && !root.cfg.locked && !(have && kept) && (root.cfg.status || {}).state !== "working"
+                                    && (modelData.kind === "transition" || modelData.usable)
+                            onPressed: root.send("pack " + (have ? "remove " : "install ") + modelData.kind + " " + modelData.name)
+                            QQC2.ToolTip.text: modelData.about + (modelData.needs ? "\n" + i18n("Needs %1.", modelData.needs) : "")
+                                + (have ? "\n" + (kept ? i18n("Kept: it's in the rotation or comes with every kiosk.") : i18n("Click to remove it.")) : "")
+                            QQC2.ToolTip.visible: pack.hovered
+                        }
+                    }
+                }
+            }
+        }
+
+        Kicker { text: "// LOCATION · for every page that takes one" }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.smallSpacing
+            QQC2.TextField { id: lat; placeholderText: "lat 39.95"; implicitWidth: root.u * 7; font.family: root.mono }
+            QQC2.TextField { id: lon; placeholderText: "lon -75.17"; implicitWidth: root.u * 7; font.family: root.mono }
+            QQC2.TextField { id: place; placeholderText: i18n("PLACE"); Layout.fillWidth: true; maximumLength: 24; font.family: root.mono }
+            KioskButton {
+                label: "SET"
+                // plain numbers and the place's own characters only: it goes on a command line
+                usable: !root.waiting && !root.cfg.locked && /^-?[0-9.]+$/.test(lat.text) && /^-?[0-9.]+$/.test(lon.text)
+                        && /^[A-Za-z0-9 .,-]*$/.test(place.text)
+                onPressed: root.send("location " + lat.text + " " + lon.text + (place.text.trim() ? " " + place.text.trim().toUpperCase() : ""))
+            }
         }
     }
 
@@ -385,7 +564,7 @@ PlasmoidItem {
                 color: root.raised
                 border.color: root.cyan
                 border.width: 2
-                visible: root.showing !== ""
+                visible: root.showing !== "" && !root.managing
 
                 Image {
                     anchors.fill: parent
@@ -404,6 +583,7 @@ PlasmoidItem {
             }
 
             Text {
+                visible: !root.managing
                 Layout.leftMargin: Kirigami.Units.largeSpacing
                 text: "// PAGES"
                 color: root.cyan
@@ -413,6 +593,7 @@ PlasmoidItem {
 
             // a picture of each page, the last time it was on: click to jump there and stay
             GridLayout {
+                visible: !root.managing
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
                 Layout.rightMargin: Kirigami.Units.largeSpacing
@@ -513,9 +694,33 @@ PlasmoidItem {
                     onPressed: root.send("update")
                 }
                 KioskButton {
+                    label: root.managing ? "‹ BACK" : "MANAGE"
+                    lit: root.managing
+                    usable: true
+                    onPressed: root.managing = !root.managing
+                }
+                KioskButton {
                     label: "SETTINGS ↗"
                     usable: true
                     onPressed: root.ask("setup")
+                }
+            }
+
+            // scrolls once it's taller than most of the screen: a full rotation and the catalog are
+            QQC2.ScrollView {
+                id: scroller
+                visible: root.managing
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                Layout.bottomMargin: Kirigami.Units.largeSpacing
+                Layout.preferredHeight: Math.min(manage.implicitHeight, Screen.desktopAvailableHeight * 0.6)
+                contentWidth: availableWidth
+                QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
+
+                Manage {
+                    id: manage
+                    width: scroller.availableWidth
                 }
             }
 
