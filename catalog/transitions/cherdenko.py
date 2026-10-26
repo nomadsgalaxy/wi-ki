@@ -396,7 +396,7 @@ def check():
         c, got = Canvas(bytearray(size), b"\x55" * size), []
         steps = frames(c, count)
         while c.wipe() or next(steps, "done") != "done":
-            got.append(bytes(c.mm))
+            c.settle(); got.append(bytes(c.mm))
         return got
     lit, real = run(), FLAMES[:]
     FLAMES[:] = [{"w": 1, "h": 1, "rows": [[]]}] * len(real)
@@ -413,8 +413,8 @@ def check():
     for count in (1, 2, 12, 144, round(SECONDS * FPS)):
         c = Canvas(bytearray(size), b"\x55" * size)
         shown, steps = [], frames(c, count)
-        while c.wipe() or next(steps, "done") != "done":   # as play() goes: this frame's decorations off, then the next
-            shown.append(bytes(c.mm))
+        while c.wipe() or next(steps, "done") != "done":   # as play() goes: the next frame, then this one's decorations off
+            c.settle(); shown.append(bytes(c.mm))
         assert len(shown) == count, count
         if count >= 12:   # its own last frame is already the new page, flame and all gone, before play() makes sure
             assert shown[-1] == b"\x55" * size, f"something's left on the last of {count} frames"
