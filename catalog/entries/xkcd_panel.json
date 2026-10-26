@@ -2,9 +2,9 @@
  "name": "xkcd_panel",
  "kind": "transition",
  "home": "public",
- "about": "a small xkcd comic between pages: the screen goes dark with its alt text, the comic prints in, then the new page comes down over it",
+ "about": "a small xkcd comic between pages, in xkcd's look: a sheet of paper slides down with its hand-lettered title and alt text, the comic prints in, then the sheet slides up off the new page",
  "found": {
-  "main": "c155c5"
+  "main": "57f6b3"
  },
  "shapes": [
   "bar"
@@ -22,7 +22,7 @@
  "ask": [],
  "licence": {
   "code": "MIT",
-  "assets": "none in the repo. The comics are fetched from xkcd.com: Randall Munroe's, CC BY-NC 2.5, credited on screen",
+  "assets": "the xkcd Script font (kiosk/fonts/xkcd-script-subset.ttf, from the IPython xkcd-font project, CC BY-NC 3.0). The comics are fetched from xkcd.com: Randall Munroe's, CC BY-NC 2.5, credited on screen",
   "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine. xkcd's licence is non-commercial: fine on our own kiosks, not on one run for profit"
  },
  "quality": {

@@ -1,6 +1,7 @@
-"""xkcd panel: a small xkcd comic between pages. The old page goes dark from the top down, with the comic's number,
-title and alt text on the left; the comic prints in on the right, top to bottom, black-and-white ones light on dark
-like the xkcd page draws them; it holds long enough to read, and the new page comes down over it.
+"""xkcd panel: a small xkcd comic between pages, in xkcd's own look. A sheet of white paper slides down over the old
+page, with the comic's number, title and alt text hand-lettered on the left (the xkcd Script font, in kiosk/fonts);
+the comic prints in on the right, top to bottom, black ink on white in a wobbly hand-drawn panel; it holds long
+enough to read, and the sheet slides up and away, off the new page.
 
 Only small comics, ones you can read in a few seconds: at most 700 x 420 at xkcd's own size, so the bar shows them at
 least that big, with alt text of 120 characters or less. Big ones are for the xkcd page. A transition can't wait on the internet, so a
@@ -10,14 +11,14 @@ laid out before it starts and kept for the whole play. Until it has one, it says
 CC BY-NC 2.5, credited on screen.
 """
 import io, json, os, random, threading, time, urllib.error, urllib.request
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 
 import kit
-from .canvas import WIDTH, HEIGHT
+from .canvas import WIDTH, HEIGHT, STRIDE
 
 SECONDS = 5
-STILL = 3.0                                   # seconds it holds still, to be read
-DARK, PRINTED, COVER = 0.08, 0.20, 0.88       # it's dark, the comic's printed, the new page starts coming down
+IN, PRINTED, OUT = 0.10, 0.24, 0.88           # the sheet's down, the comic's printed, the sheet starts going up
+STILL = (OUT - PRINTED) * SECONDS             # seconds it holds still, to be read
 API = "https://xkcd.com/{}info.0.json"
 PICTURES = "https://imgs.xkcd.com/comics/"
 UA = {"User-Agent": "wi-ki xkcd_panel (github.com/nomadsgalaxy/wi-ki)"}
@@ -28,7 +29,9 @@ WIDE, TALL = 700, 420                    # the biggest a small comic is at xkcd'
 ALT = 120                                     # the longest alt text
 BIGGEST = 4 << 20
 COMIC = (700, 24, WIDTH - 24, HEIGHT - 24)    # where the comic goes
-INK, DIM = (232, 236, 255), (154, 163, 199)
+PAPER, INK, PENCIL, EDGE = (255, 255, 255), (0, 0, 0), (110, 110, 110), (40, 40, 40)
+FONT = os.path.join(os.path.dirname(os.path.realpath(kit.__file__)), "fonts", "xkcd-script-subset.ttf")
+LEFT, TEXT_W = 40, 620                        # the words' column
 
 
 def get(url, limit=1 << 20):
@@ -86,46 +89,71 @@ def save(comics):
     os.replace(KEPT + ".tmp", KEPT)
 
 
-def wrap(words, width):
-    lines = [""]
-    for word in (w[i:i + width] for w in words.split() for i in range(0, len(w), width)):
-        if lines[-1] and len(lines[-1]) + 1 + len(word) > width:
-            lines.append("")
-        lines[-1] = (lines[-1] + " " + word).strip()
-    return lines
+def hand(size):
+    return ImageFont.truetype(FONT, size)
+
+
+def wrap(words, font, width):
+    """words in lines no wider than width pixels in font; a word wider than a line is split"""
+    lines, line = [], ""
+    for word in words.split():
+        while font.getlength(word) > width:   # too wide for any line: as much as fits, on a line of its own
+            cut = 1
+            while cut < len(word) and font.getlength(word[:cut + 1]) <= width:
+                cut += 1
+            if line:
+                lines.append(line); line = ""
+            lines.append(word[:cut]); word = word[cut:]
+        if line and font.getlength(line + " " + word) > width:
+            lines.append(line); line = word
+        else:
+            line = (line + " " + word).strip()
+    return lines + [line] if line else lines
+
+
+def wobble(d, points, seed, width=3):
+    """a hand-drawn line through points: every short stretch nudged a pixel or two off true, the same each time"""
+    rnd = random.Random(seed)
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        n = max(1, round(max(abs(x1 - x0), abs(y1 - y0)) / 40))
+        way = [(x0 + (x1 - x0) * i / n + (rnd.uniform(-1.6, 1.6) if 0 < i < n else 0),
+                y0 + (y1 - y0) * i / n + (rnd.uniform(-1.6, 1.6) if 0 < i < n else 0)) for i in range(n + 1)]
+        d.line(way, fill=INK, width=width, joint="curve")
 
 
 def scene(comic):
-    """the comic laid out, before it plays -> {"words": the dark screen with the title and alt text, "full": that and
-    the comic, packed bytes; "box": where the comic is (x, y, w, h)}"""
-    img = Image.new("RGB", (WIDTH, HEIGHT), kit.BG)
+    """the comic laid out on its sheet, before it plays -> {"words": the sheet with the number, title and alt text,
+    "full": that and the comic, packed bytes; "box": where the comic and its panel are (x, y, w, h)}"""
+    img = Image.new("RGB", (WIDTH, HEIGHT), PAPER); d = ImageDraw.Draw(img)
     if not comic:
-        kit.text(img, (40, 40), "// XKCD", kit.O, scale=1)
-        kit.text(img, (40, 64), "A COMIC WILL BE HERE ONCE THE KIOSK'S BEEN ONLINE", DIM, scale=2)
+        d.text((LEFT, 40), "xkcd", font=hand(40), fill=PENCIL)
+        d.text((LEFT, 100), "A comic will be here once the kiosk's been online.", font=hand(44), fill=INK)
         plain = kit.rgb565(img)
         return {"words": plain, "full": plain, "box": None}
-    kit.text(img, (40, 40), f"// XKCD #{comic['num']}", kit.O, scale=1)
-    kit.text(img, (40, 64), comic["title"].upper()[:20], INK, scale=4)
-    for i, line in enumerate(wrap(comic["alt"], 38)[:5]):
-        kit.text(img, (40, 160 + i * 40), line, DIM, scale=2)
-    kit.text(img, (40, HEIGHT - 30), "xkcd.com · Randall Munroe · CC BY-NC 2.5", kit.D, scale=1)
-    words = kit.rgb565(img)
+    d.text((LEFT, 22), f"xkcd #{comic['num']}", font=hand(30), fill=PENCIL)
+    size = 64
+    while size > 30 and hand(size).getlength(comic["title"]) > TEXT_W:
+        size -= 4
+    title = hand(size)
+    d.text((LEFT, 58), comic["title"] if title.getlength(comic["title"]) <= TEXT_W else wrap(comic["title"], title, TEXT_W)[0],
+           font=title, fill=INK)
+    rule = 58 + size + 22
+    wobble(d, [(LEFT, rule), (LEFT + TEXT_W, rule)], comic["num"])
+    words = hand(32)
+    for i, line in enumerate(wrap(comic["alt"], words, TEXT_W)[:(HEIGHT - 60 - rule) // 38]):
+        d.text((LEFT, rule + 14 + i * 38), line, font=words, fill=INK)
+    d.text((LEFT, HEIGHT - 38), "xkcd.com · Randall Munroe · CC BY-NC 2.5", font=hand(22), fill=PENCIL)
+    sheet = kit.rgb565(img)
     pic = Image.open(comic["file"]).convert("RGB")
-    plain = all(abs(r - g) < 24 and abs(g - b) < 24 for r, g, b in pic.resize((64, 64)).getdata())
-    if plain:   # black on white: light on dark instead, as the xkcd page draws it
-        pic = Image.eval(ImageOps.invert(pic.convert("L")), lambda v: v * 236 // 255).convert("RGB")
-    w, h = COMIC[2] - COMIC[0], COMIC[3] - COMIC[1]
+    w, h = COMIC[2] - COMIC[0] - 24, COMIC[3] - COMIC[1] - 24   # inside its panel
     k = min(w / pic.width, h / pic.height)
     pic = pic.resize((pic.width * int(k), pic.height * int(k)), Image.NEAREST) if k >= 2 else \
         pic.resize((max(1, round(pic.width * k)), max(1, round(pic.height * k))), Image.LANCZOS)
-    x, y = COMIC[0] + (w - pic.width) // 2, COMIC[1] + (h - pic.height) // 2
-    if not plain:   # colour keeps a white card round it
-        img.paste((255, 255, 255), (x - 12, y - 12, x + pic.width + 12, y + pic.height + 12))
-        x0, y0, x1, y1 = x - 12, y - 12, x + pic.width + 12, y + pic.height + 12
-    else:
-        x0, y0, x1, y1 = x, y, x + pic.width, y + pic.height
+    x, y = COMIC[0] + 12 + (w - pic.width) // 2, COMIC[1] + 12 + (h - pic.height) // 2
     img.paste(pic, (x, y))
-    return {"words": words, "full": kit.rgb565(img), "box": (x0, y0, x1 - x0, y1 - y0)}
+    x0, y0, x1, y1 = x - 12, y - 12, x + pic.width + 11, y + pic.height + 11   # the panel, as xkcd draws one
+    wobble(d, [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], comic["num"] + 1)
+    return {"words": sheet, "full": kit.rgb565(img), "box": (x0 - 2, y0 - 2, x1 - x0 + 5, y1 - y0 + 5)}
 
 
 def pick(comics):
@@ -171,25 +199,35 @@ def refresh():
         _busy.release()
 
 
+def ease(t):
+    t = min(1.0, max(0.0, t))
+    return t * t * (3 - 2 * t)
+
+
 def frames(c, count):
     shown = ready["scene"] or scene(pick(kept()))   # chosen now, and kept for the whole play
     ready["scene"] = None                            # this one's used: lay out the next while this plays
     threading.Thread(target=refresh, daemon=True).start()
-    dark = printed = covered = 0
+    down = printed = 0
+    gone = False
     box = shown["box"]
     for k in range(count):
         t = k / max(1, count - 1)                    # a lone frame is the first; play() lands on the new page
-        rows = min(HEIGHT, round(t / DARK * HEIGHT))
-        if rows > dark:                              # the dark comes down, with the words: whole rows
-            c.reveal(0, dark, WIDTH, rows - dark, src=shown["words"]); dark = rows
-        if box and t >= DARK:                        # the comic prints in, top to bottom
-            done = min(box[3], round((t - DARK) / (PRINTED - DARK) * box[3]))
+        if t < IN:                                   # in: the sheet slides down over the old page, its edge dark
+            at = round(ease(t / IN) * HEIGHT)
+            c.rows(at - HEIGHT, shown["words"]); c.fill(0, at, WIDTH, 3, EDGE)
+        elif not down:                               # down: the sheet's the page now, for good
+            c.reveal(0, 0, WIDTH, HEIGHT, src=shown["words"]); down = 1
+        if box and IN <= t < OUT:                    # the comic prints in, top to bottom, panel and all
+            done = min(box[3], round((t - IN) / (PRINTED - IN) * box[3]))
             if done > printed:
                 c.reveal(box[0], box[1] + printed, box[2], done - printed, src=shown["full"]); printed = done
-        if t >= COVER:                               # and the new page comes down over it: whole rows
-            rows = min(HEIGHT, round((t - COVER) / (1 - COVER) * HEIGHT))
-            if rows > covered:
-                c.reveal(0, covered, WIDTH, rows - covered); covered = rows
+        if t >= OUT:                                 # out: the new page under it, and the sheet slides up and away
+            if not gone:
+                c.reveal(0, 0, WIDTH, HEIGHT); gone = True
+            at = round(ease((t - OUT) / (1 - OUT)) * HEIGHT)
+            if at < HEIGHT:
+                c.rows(-at, shown["full"]); c.fill(0, HEIGHT - at, WIDTH, 3, EDGE)
         yield
 
 
@@ -218,6 +256,12 @@ def check():
             assert scene(None)["box"] is None, "with no comic yet, it says so"
             colour = Image.new("RGB", (500, 500), (200, 40, 40)); colour.save(os.path.join(folder, "3.png"))
             x, y, w, h = scene({"num": 3, "title": "Ω" * 50, "alt": "word " * 30, "file": os.path.join(folder, "3.png")})["box"]
-            assert COMIC[0] <= x and x + w <= COMIC[2] + 12 and y >= 0 and y + h <= HEIGHT, "colour, with its card"
+            assert COMIC[0] - 2 <= x and x + w <= COMIC[2] + 3 and y >= 0 and y + h <= HEIGHT, "colour, in its panel"
+            assert scene({"num": 4, "title": "A Title Far Too Long To Fit In The Column At Any Size At All", "alt": "x" * 119,
+                          "file": os.path.join(folder, "1.png")})["box"], "long words and titles still lay out"
+            f = hand(32)
+            for text in ("Supercalifragilisticexpialidocious " * 3, "a b c", "", "w" * 200):
+                assert all(f.getlength(l) <= TEXT_W for l in wrap(text, f, TEXT_W)), text[:20]
+            assert wrap("one two", f, TEXT_W) == ["one two"] and ease(-1) == 0 and ease(2) == 1
         finally:
             FOLDER, KEPT = real
