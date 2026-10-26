@@ -102,6 +102,25 @@ It uses its own key, `~/.ssh/desk-kiosk-control`, which the Pi only lets run `ki
 restrict,command="python3 -I /home/kiosk/kiosk/control.py" ssh-ed25519 AAAA… desk-kiosk-control
 ```
 
+### Pairing with a kiosk
+
+You don't have to add that key by hand. When you set a kiosk up, its setup page asks for a **shared key** along with
+your login: any 8 to 32 characters, the same on every kiosk you want to control. Then, from the computer:
+
+```
+kiosk-ctl screens                # the kiosks nearby (they advertise themselves; mDNS doesn't cross VLANs)
+kiosk-ctl pair 192.168.1.50       # asks for the shared key, pairs, and writes ~/.config/kiosk-ctl.d/<card id>
+KIOSK_SCREEN=k-1a2b3c kiosk-ctl status
+KIOSK_SCREEN=k-1a2b3c kiosk-ctl update   # update now: the smoke test still runs, and the render server updates too
+```
+
+`pair` makes `~/.ssh/desk-kiosk-control` if you don't have it, and proves it knows the shared key without sending it.
+The kiosk adds the key locked to `control.py`, the same line as above. The first time, it shows the kiosk's
+certificate fingerprint, which should match the one on the kiosk's screen (or pass `--fingerprint AB:CD:…`), and pins
+it. On a kiosk drawn by a render server, you pair with the Pi, and it passes every command on to the server. Wrong
+shared keys slow down after five, like logins. A kiosk set up before this can get one from the setup page's login
+form, or over SSH with `python3 -I ~/kiosk/pairing.py --set` (it reads the key from stdin).
+
 `control.py` checks the page against the playlist and writes `~/.cache/kiosk/control.json`, and `kiosk.py` picks it up
 within a quarter second. A pinned page starts over every time its seconds run out, so the weather still refreshes.
 

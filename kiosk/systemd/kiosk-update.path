@@ -1,0 +1,10 @@
+[Unit]
+Description=Wi-Ki: update now when a paired computer asks (control.py update)
+
+[Path]
+# control.py writes it; the autoupdate does the rest, smoke test and all, as on its timer
+PathChanged=/home/kiosk/.cache/kiosk/update-request
+Unit=kiosk-autoupdate.service
+
+[Install]
+WantedBy=paths.target

@@ -423,7 +423,7 @@ def check():
     importlib.import_module("control").check()
     check_snap()
     touchpanel.check()
-    for name in ("config", "form", "fuzz", "link", "look", "packs", "admin", "setup_check"):   # the setup page and the rules it has to keep
+    for name in ("config", "form", "fuzz", "link", "look", "packs", "pairing", "admin", "setup_check"):   # the setup page and the rules it has to keep
         importlib.import_module(name).check()
     gone = os.path.join(HERE, "no-setup.json")   # the Setup page as main() and run() reach it, through the package
     assert setup_page.urgent(gone) is False and setup_page.read(gone) == (None, 0)
