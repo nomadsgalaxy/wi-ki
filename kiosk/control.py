@@ -17,6 +17,16 @@
   transitions     {"all": [...], "off": [...]}: the transitions installed, and the ones turned off
   transition <name> on|off   turn one on or off (not the last one on), and restart the display, as the setup page does
 
+Managing it, the setup page's Pages, Location and Install tabs (it runs the setup page's own rules and saving, so a
+change from here is checked the same way, and goes to the render server when that's where the settings are kept):
+  config          {"playlist", "off", "themes", "drawn_by", "locked", "present", "core", "status", "catalog": [...]}
+  page add <name>                     add a catalog page to the rotation (installed first: pack install)
+  page on|off|up|down|remove <n>      the nth entry of the playlist, from 0
+  page seconds <n> <seconds>
+  location <lat> <lon> [<place>]      for every page that takes one
+  pack install|remove page|transition <name>    from Wi-Ki's catalog only; repos stay on the setup page
+  pack check                          look for updates to what's installed from repos
+
 A kiosk whose pages a render server draws (remote.json with a server and the key) passes every command on to the
 server over link.py, so one key on the Pi controls both; if the server can't be reached, the Pi is drawing its own
 pages, so it answers itself.
@@ -74,9 +84,11 @@ def version(state=STATE):
     except ValueError:
         seen = {}
     seen = seen if isinstance(seen, dict) else {}
-    behind = seen.get("behind")
-    return {"commit": text("applied-commit")[:7] or None, "latest": str(seen.get("latest") or "")[:7] or None,
-            "behind": behind if isinstance(behind, int) else None, "refused": text("refused-commit")[:7] or None}
+    behind, latest, refused = seen.get("behind"), str(seen.get("latest") or ""), text("refused-commit")
+    return {"commit": text("applied-commit")[:7] or None, "latest": latest[:7] or None,
+            "behind": behind if isinstance(behind, int) else None,
+            # autoupdate never clears it, so only while it's still the newest it's seen; a later commit supersedes it
+            "refused": refused[:7] if refused and refused == latest else None}
 
 
 def run(args, cache=CACHE, playlist=PLAYLIST, off=OFF, dirs=THEMES, restart=restart):
@@ -136,8 +148,52 @@ def run(args, cache=CACHE, playlist=PLAYLIST, off=OFF, dirs=THEMES, restart=rest
     return "ok"
 
 
+MANAGE = ("config", "page", "location", "pack")
+
+
+def manage(args, admin=None):
+    """the setup page's Pages, Location and Install tabs, as commands -> what to print; ValueError if it's refused"""
+    if admin is None:
+        sys.path.insert(0, HERE)
+        import admin   # only for these: it's the setup page's whole module
+    known, drawn_by = admin.catalog(), admin.server()
+    if args == ["config"]:
+        state, now = admin.pack_state(), admin.current()
+        return json.dumps({"playlist": now["playlist"], "off": now["off"], "themes": admin.themes(), "drawn_by": drawn_by,
+                           "locked": admin.locked(), "present": state["present"], "core": admin.packs.core(admin.HERE),
+                           "status": {k: state["status"].get(k) for k in ("state", "message")},
+                           "catalog": [{"name": n, "kind": e.get("kind"), "about": admin.summary(e.get("about", "")),
+                                        "needs": admin.needs_line(e), "usable": admin.unusable(e, drawn_by) is None}
+                                       for n, e in sorted(known.items())]})
+    if admin.locked():
+        raise ValueError("its render server keeps its settings, and this kiosk hasn't the key to change them there")
+    if args[:2] == ["page", "add"] and len(args) == 3:
+        form = {"action": "add", "page": args[2]}
+    elif args[:1] == ["page"] and len(args) == 3 and args[1] in ("on", "off", "up", "down", "remove"):
+        form = {"action": args[1], "i": args[2]}
+    elif args[:2] == ["page", "seconds"] and len(args) == 4:
+        form = {"action": "seconds", "i": args[2], "seconds": args[3]}
+    elif args[:1] == ["location"] and len(args) >= 3:
+        admin.save(playlist=admin.change_location(admin.current()["playlist"], {"lat": args[1], "lon": args[2],
+                                                                                 "place": " ".join(args[3:])}, known))
+        return "ok"
+    elif args[:2] == ["pack", "check"] and len(args) == 2:
+        admin.send_pack(admin.pack_form({"action": "check"}))
+        return "ok"
+    elif args[:1] == ["pack"] and len(args) == 4 and args[1] in ("install", "remove"):
+        admin.send_pack(admin.pack_form({"action": "catalog" if args[1] == "install" else "remove", "kind": args[2], "name": args[3]}))
+        return "ok"
+    else:
+        raise ValueError("usage: config | page add <name> | page on|off|up|down|remove <n> | page seconds <n> <s>"
+                         " | location <lat> <lon> [<place>] | pack install|remove page|transition <name> | pack check")
+    admin.save(playlist=admin.change_pages(admin.current()["playlist"], form, known, drawn_by))
+    return "ok"
+
+
 def dispatch(args, remote=REMOTE, here=run, there=None):
     """run a command here, or on the render server that draws this kiosk's pages; update and status take in both"""
+    if args[:1] and args[0] in MANAGE:   # the setup page's code knows where the settings are kept, and goes there itself
+        return manage(args)
     try:
         server = json.load(open(remote))
     except (OSError, ValueError):
@@ -221,6 +277,8 @@ def check():
     open(os.path.join(state, "fetched.json"), "w").write(json.dumps({"latest": "b" * 40, "behind": 2}))
     open(os.path.join(state, "refused-commit"), "w").write("b" * 40 + "\n")
     assert version(state) == {"commit": "a" * 7, "latest": "b" * 7, "behind": 2, "refused": "b" * 7}
+    open(os.path.join(state, "fetched.json"), "w").write(json.dumps({"latest": "c" * 40, "behind": 0}))
+    assert version(state)["refused"] is None, "a newer commit since: the refusal's history"
     open(os.path.join(state, "fetched.json"), "w").write("[not")
     assert version(state)["latest"] is None and version(state)["behind"] is None
     open(os.path.join(state, "fetched.json"), "w").write("[1]")
@@ -254,6 +312,43 @@ def check():
     assert dispatch(["next"], os.path.join(state, "none.json"), mine, srv) == "here", "no render server: here"
     json.dump({"server": "10.0.0.9"}, open(remote, "w"))
     assert dispatch(["next"], remote, mine, srv) == "here", "a server but no key: it can't ask, so here"
+    # managing it: the setup page's own rules, from commands
+    import types
+    saved, sent = [], []
+    fake = types.SimpleNamespace(
+        catalog=lambda: {"sky": {"kind": "page", "about": "A sky. More.", "settings": {"lat": 0, "lon": 0}},
+                         "rain": {"kind": "transition", "about": "rain"}},
+        server=lambda: None, locked=lambda: False, themes=lambda: ["rain"], HERE=HERE,
+        current=lambda: {"playlist": [{"page": "weather"}, {"page": "sky", "seconds": 20}], "off": []},
+        pack_state=lambda: {"present": {"pages": ["weather", "sky"], "transitions": ["rain"]}, "status": {"state": "done"}, "packs": {}},
+        packs=types.SimpleNamespace(core=lambda here: {"pages": ["weather"], "transitions": []}),
+        summary=lambda about: about.split(".")[0], needs_line=lambda e: "", unusable=lambda e, d: None if e["kind"] == "page" else "no",
+        save=lambda playlist=None, off=None: saved.append(playlist), send_pack=sent.append, pack_form=lambda f: {"id": "x", **f})
+    import admin as real
+    fake.change_pages, fake.change_location = real.change_pages, real.change_location
+    got = json.loads(manage(["config"], fake))
+    assert got["playlist"][1] == {"page": "sky", "seconds": 20} and got["catalog"][0] == {"name": "rain", "kind": "transition",
+                                                                                          "about": "rain", "needs": "", "usable": False}
+    assert manage(["page", "up", "1"], fake) == "ok" and saved[-1] == [{"page": "sky", "seconds": 20}, {"page": "weather"}]
+    manage(["page", "seconds", "0", "45"], fake)
+    assert saved[-1][0] == {"page": "weather", "seconds": 45}
+    manage(["page", "add", "sky"], fake)
+    assert saved[-1][-1] == {"page": "sky"}
+    manage(["location", "39.95", "-75.17", "SOUTH", "PHILLY"], fake)
+    assert saved[-1][1]["options"] == {"lat": 39.95, "lon": -75.17}, "only pages that take a location"
+    manage(["pack", "install", "transition", "rain"], fake)
+    assert sent[-1] == {"id": "x", "action": "catalog", "kind": "transition", "name": "rain"}
+    for bad in (["page", "add", "rain"], ["page", "off", "9"], ["page", "seconds", "0", "0"], ["location", "x", "y"], ["pack", "nuke"]):
+        try:
+            manage(bad, fake); raise AssertionError(f"{bad} taken")
+        except ValueError:
+            pass
+    fake.locked = lambda: True
+    try:
+        manage(["page", "up", "1"], fake); raise AssertionError("changed it without the key")
+    except ValueError:
+        pass
+    assert json.loads(manage(["config"], fake))["locked"] is True, "it still shows them"
     print("control: ok")
 
 

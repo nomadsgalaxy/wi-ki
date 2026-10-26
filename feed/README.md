@@ -90,6 +90,10 @@ kiosk-ctl thumbs                 # a small picture of each page, the last time i
 kiosk-ctl transitions            # the transitions installed, and the ones turned off
 kiosk-ctl transition tetris off  # turn one off (or on); it restarts the display, as the setup page does
 kiosk-ctl setup                  # the setup page's address
+kiosk-ctl config                 # its settings and the catalog, as JSON (what the widget's Manage shows)
+kiosk-ctl page add septa         # add a catalog page to the rotation; page on|off|up|down|remove <n>, page seconds <n> <s>
+kiosk-ctl pack install transition cherdenko   # subscribe to one from the catalog; pack remove page|transition <name>
+kiosk-ctl location 39.95 -75.17 PHILADELPHIA  # for every page that takes a location
 ```
 
 Where it goes is in `~/.config/kiosk-ctl`, which `install.sh` writes: `host=`, where the pages are drawn (the render
@@ -133,7 +137,11 @@ a panel as a button of its own (right-click the panel, **Add Widgets**, Desk Kio
 the tray squeezes every widget into one small shared popup. Click it for what's on the kiosk now, a picture of every page in the rotation (the last time each was on screen; the kiosk
 keeps them in `~/.cache/kiosk/thumbs/`) to jump to, Auto, Next and Settings (the setup page, in the browser), and the
 transitions to turn on and off. Middle-click skips to the next page. The icon turns into a pin while a page is
-pinned. It only asks the kiosk anything while the popup is open.
+pinned. It only asks the kiosk anything while the popup is open. **Manage** swaps the pictures for the kiosk's settings: the rotation
+(on and off, order, seconds, remove, and pages to add), every page and transition in the catalog to subscribe to or
+drop, and the location. They're the setup page's Pages, Install and Location tabs, checked by the kiosk with the same
+rules, and on a kiosk drawn by a render server they change the server's settings. A page's own settings, and installing
+from someone's repo, stay on the setup page.
 
 Plasma keeps a widget it has loaded, so after `install.sh` updates it, it only shows once plasmashell restarts
 (`systemctl --user restart plasma-plasmashell`).
