@@ -2,7 +2,7 @@
  "name": "xkcd_panel",
  "kind": "transition",
  "home": "public",
- "about": "a small xkcd comic between pages, in xkcd's look: a sheet of paper slides down with its hand-lettered title and alt text, the comic prints in, then the sheet slides up off the new page",
+ "about": "a small xkcd comic between pages, in xkcd's look: a sheet of the kiosk's dark slides down with its hand-lettered title and alt text, the comic prints in (light on dark, as on the xkcd page), then the sheet slides up off the new page",
  "found": {
   "main": "87163c"
  },
