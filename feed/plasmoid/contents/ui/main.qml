@@ -93,7 +93,7 @@ PlasmoidItem {
             const ask = m[2];
             if (ask === "paired") {
                 root.paired = out === "" ? [] : out.split("\n");
-                if (root.chosen === "" && root.paired.length > 0) {
+                if (root.chosen === "" && root.paired.length > 0 && root.paired[0] !== "default") {
                     root.pick(root.paired[0]);
                 }
                 return;
@@ -168,6 +168,9 @@ PlasmoidItem {
     }
 
     function screenName(id) {
+        if (id === "default") {
+            return i18n("Default");
+        }
         const found = root.nearby.find(s => s.id === id);
         return found ? found.name : id;
     }
@@ -338,7 +341,7 @@ PlasmoidItem {
                     KioskButton {
                         required property string modelData
                         label: root.screenName(modelData).toUpperCase()
-                        lit: root.chosen === modelData
+                        lit: root.chosen === modelData || (modelData === "default" && root.chosen === "")
                         usable: true
                         onPressed: root.pick(modelData)
                     }
@@ -495,9 +498,12 @@ PlasmoidItem {
                     onPressed: root.send("next")
                 }
                 KioskButton {
-                    label: root.version.commit === undefined ? "UPDATE"
+                    // behind is as of its last look (every 10 minutes), so up to date still offers to look now
+                    readonly property string refused: root.version.refused || (root.version.server || {}).refused || ""
+                    label: !root.version.commit ? "UPDATE"
+                        : refused !== "" ? "REFUSED " + refused + " · CHECK NOW"
                         : root.behind() > 0 ? "UPDATE · " + root.behind() + " BEHIND"
-                        : "UP TO DATE · " + root.version.commit
+                        : "UP TO DATE " + root.version.commit + " · CHECK NOW"
                     lit: root.behind() > 0
                     onPressed: root.send("update")
                 }

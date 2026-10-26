@@ -35,7 +35,6 @@ OFF = os.path.expanduser("~/.config/kiosk/transitions-off.json")   # as in trans
 # where transitions are installed, as transitions/__init__.py finds them (without importing it: that loads them all)
 # autoupdate's, as the kiosk user's: the same place on a Pi and on a render server, whatever HOME an instance has
 STATE = os.path.realpath(os.path.join(HERE, "..", ".cache", "kiosk"))
-REPO = os.path.realpath(os.path.join(HERE, "..", "wi-ki"))
 REMOTE = os.path.expanduser("~/.config/kiosk/remote.json")
 THEMES = [os.path.join(HERE, "transitions"), os.path.join(HERE, "..", "catalog", "transitions"),
           os.path.expanduser("~/.local/share/kiosk/transitions")]
@@ -62,20 +61,22 @@ def read(path):
         return {}
 
 
-def version(state=STATE, repo=REPO):
-    """the commit autoupdate applied, the latest it's fetched from GitHub, and how many commits that is ahead"""
-    def text(*cmd):
+def version(state=STATE):
+    """the commit autoupdate applied, the latest it's fetched from GitHub (on the branch it follows), how many commits
+    that is ahead, and the one it refused, if its tests failed; all from what autoupdate wrote, so no git here"""
+    def text(name):
         try:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout.strip()
-        except (OSError, subprocess.SubprocessError):
+            return open(os.path.join(state, name)).read().strip()
+        except OSError:
             return ""
     try:
-        applied = open(os.path.join(state, "applied-commit")).read().strip()
-    except OSError:
-        applied = ""
-    latest = text("git", "-C", repo, "rev-parse", "origin/main")
-    behind = text("git", "-C", repo, "rev-list", "--count", f"{applied}..{latest}") if applied and latest else ""
-    return {"commit": applied[:7] or None, "latest": latest[:7] or None, "behind": int(behind) if behind.isdigit() else None}
+        seen = json.loads(text("fetched.json") or "{}")
+    except ValueError:
+        seen = {}
+    seen = seen if isinstance(seen, dict) else {}
+    behind = seen.get("behind")
+    return {"commit": text("applied-commit")[:7] or None, "latest": str(seen.get("latest") or "")[:7] or None,
+            "behind": behind if isinstance(behind, int) else None, "refused": text("refused-commit")[:7] or None}
 
 
 def run(args, cache=CACHE, playlist=PLAYLIST, off=OFF, dirs=THEMES, restart=restart):
@@ -149,16 +150,25 @@ def dispatch(args, remote=REMOTE, here=run, there=None):
         there = there or (lambda a: link.request((server["server"], int(server.get("port", 7676))), k, {"op": "control", "args": a})["out"])
     if not k:
         return here(args)
+    if args == ["update"]:   # this one first, so it updates even when the server can't or won't
+        here(args)
+        try:
+            there(args)
+        except (OSError, ValueError) as e:
+            return f"ok, but its render server didn't take it: {e}"
+        return "ok"
     try:
         out = there(args)
     except OSError:   # no server: the Pi is drawing its own pages, so it answers for itself
         return here(args)
-    if args == ["update"]:
-        return here(args)
+    except ValueError as e:
+        if "isn't something it does" not in str(e):
+            raise
+        return here(args)   # a server older than this Pi, between their updates
     if args == ["status"]:
+        keys = ("commit", "latest", "behind", "refused")
         theirs, mine = json.loads(out), json.loads(here(args))
-        return json.dumps({**theirs, **{k: mine[k] for k in ("commit", "latest", "behind")},
-                           "server": {k: theirs.get(k) for k in ("commit", "latest", "behind")}})
+        return json.dumps({**theirs, **{k: mine.get(k) for k in keys}, "server": {k: theirs.get(k) for k in keys}})
     return out
 
 
@@ -204,24 +214,40 @@ def check():
         except ValueError:
             continue
         raise AssertionError(f"{bad} should be refused")
-    # the version: what autoupdate applied, and how far GitHub's main is ahead of it
-    repo, state = tempfile.mkdtemp(), tempfile.mkdtemp()
-    g = lambda *a: subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True, text=True).stdout.strip()
-    g("init", "-q", "-b", "main"); g("commit", "-q", "--allow-empty", "-m", "a")
-    first = g("rev-parse", "HEAD"); g("commit", "-q", "--allow-empty", "-m", "b"); g("commit", "-q", "--allow-empty", "-m", "c")
-    g("update-ref", "refs/remotes/origin/main", "HEAD")
-    open(os.path.join(state, "applied-commit"), "w").write(first + "\n")
-    assert version(state, repo) == {"commit": first[:7], "latest": g("rev-parse", "HEAD")[:7], "behind": 2}
-    assert version(tempfile.mkdtemp(), repo)["behind"] is None, "nothing applied yet: it can't say"
+    # the version: what autoupdate applied and fetched, from its files
+    state = tempfile.mkdtemp()
+    assert version(state) == {"commit": None, "latest": None, "behind": None, "refused": None}, "nothing applied yet: it can't say"
+    open(os.path.join(state, "applied-commit"), "w").write("a" * 40 + "\n")
+    open(os.path.join(state, "fetched.json"), "w").write(json.dumps({"latest": "b" * 40, "behind": 2}))
+    open(os.path.join(state, "refused-commit"), "w").write("b" * 40 + "\n")
+    assert version(state) == {"commit": "a" * 7, "latest": "b" * 7, "behind": 2, "refused": "b" * 7}
+    open(os.path.join(state, "fetched.json"), "w").write("[not")
+    assert version(state)["latest"] is None and version(state)["behind"] is None
+    open(os.path.join(state, "fetched.json"), "w").write("[1]")
+    assert version(state)["latest"] is None, "not a dict: nothing"
     # on a kiosk drawn by a render server: commands go there, update and status take in both, and no server means here
     remote = os.path.join(tempfile.mkdtemp(), "remote.json")
     json.dump({"server": "10.0.0.9", "port": 7677, "key": "ab" * 32}, open(remote, "w"))
-    sent, mine = [], lambda a: json.dumps({"pages": ["pi"], "commit": "aaaaaaa", "latest": "bbbbbbb", "behind": 1}) if a == ["status"] else "here"
+    sent, mine = [], lambda a: json.dumps({"pages": ["pi"], "commit": "aaaaaaa", "latest": "bbbbbbb", "behind": 1, "refused": None}) if a == ["status"] else "here"
     srv = lambda a: sent.append(a) or (json.dumps({"pages": ["weather"], "showing": "weather", "commit": "ccccccc", "latest": "ccccccc", "behind": 0}) if a == ["status"] else "ok")
     assert dispatch(["next"], remote, mine, srv) == "ok" and sent == [["next"]]
     assert json.loads(dispatch(["status"], remote, mine, srv)) == {"pages": ["weather"], "showing": "weather", "commit": "aaaaaaa", "latest": "bbbbbbb",
-                                                                  "behind": 1, "server": {"commit": "ccccccc", "latest": "ccccccc", "behind": 0}}
-    assert dispatch(["update"], remote, mine, srv) == "here" and sent[-1] == ["update"], "update: the server, then here"
+                                                                  "behind": 1, "refused": None,
+                                                                  "server": {"commit": "ccccccc", "latest": "ccccccc", "behind": 0, "refused": None}}
+    ran = []
+    here_too = lambda a: ran.append(a) or mine(a)
+    assert dispatch(["update"], remote, here_too, srv) == "ok" and sent[-1] == ["update"] and ran == [["update"]], "update: both"
+    def old(a):
+        raise ValueError("that isn't something it does")
+    ran.clear()
+    assert dispatch(["update"], remote, here_too, old).startswith("ok, but") and ran == [["update"]], "an older server: the Pi still updates"
+    assert dispatch(["next"], remote, mine, old) == "here", "and other commands answer here until the server catches up"
+    def no(a):
+        raise ValueError("usage: status | ...")
+    try:
+        dispatch(["show", "nope"], remote, mine, no); raise AssertionError("a real refusal was swallowed")
+    except ValueError:
+        pass
     def down(a):
         raise OSError("no route")
     assert dispatch(["next"], remote, mine, down) == "here", "no server: the Pi answers"
