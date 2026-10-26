@@ -83,12 +83,20 @@ def installed(conf=CONF):
 
 
 def in_playlist(conf=CONF, here=HERE):
-    """the pages the kiosk's playlist names, on or off"""
+    """the pages the kiosk's playlist names, on or off; on a server that draws for several kiosks (each with its own
+    HOME in servers/<name>, see docs/server.md), every one of their playlists too, since they share these pages"""
+    names = set()
     for path in (os.path.join(conf, "playlist.json"), os.path.join(here, "playlist.json")):
         got = read_json(path, None)
         if isinstance(got, list):
-            return {e["page"] for e in got if isinstance(e, dict) and isinstance(e.get("page"), str)}
-    return set()
+            names = {e["page"] for e in got if isinstance(e, dict) and isinstance(e.get("page"), str)}
+            break
+    servers = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(conf))), "servers")
+    for name in sorted(os.listdir(servers)) if os.path.isdir(servers) else []:
+        got = read_json(os.path.join(servers, name, ".config", "kiosk", "playlist.json"), None)
+        if isinstance(got, list):
+            names |= {e["page"] for e in got if isinstance(e, dict) and isinstance(e.get("page"), str)}
+    return names
 
 
 def wanted(repo, conf, live):
@@ -369,6 +377,16 @@ def check():
         else:
             raise AssertionError("removed a page that's in the playlist")
         os.remove(os.path.join(conf, "playlist.json"))
+        # a server that draws for several kiosks: a page any of their playlists names is in use, and stays
+        with tempfile.TemporaryDirectory() as home:
+            mine, door = os.path.join(home, ".config", "kiosk"), os.path.join(home, "servers", "door", ".config", "kiosk")
+            os.makedirs(mine); os.makedirs(door)
+            json.dump([{"page": "weather"}], open(os.path.join(mine, "playlist.json"), "w"))
+            json.dump([{"page": "sky"}, {"page": "calendar", "on": False}], open(os.path.join(door, "playlist.json"), "w"))
+            assert in_playlist(mine, here) == {"weather", "sky", "calendar"}, in_playlist(mine, here)
+            os.makedirs(os.path.join(home, "servers", "broken", ".config", "kiosk"))
+            open(os.path.join(home, "servers", "broken", ".config", "kiosk", "playlist.json"), "w").write("[not")
+            assert in_playlist(mine, here) == {"weather", "sky", "calendar"}, "a broken one is skipped"
         json.dump(["hive76"], open(os.path.join(conf, "transitions-off.json"), "w"))
         go({"op": "remove", "kind": "transition", "name": "hive76"})
         assert not os.path.exists(os.path.join(here, "transitions", "hive76.py")) and installed(conf)["transitions"] == []

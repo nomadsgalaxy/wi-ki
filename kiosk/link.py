@@ -133,11 +133,19 @@ def pack_request(req):
     return {k: req[k] for k in ("id", "op", "kind", "name", "source", "repo", "ref") if k in req}
 
 
+def machine(here=HERE):
+    """the machine's own settings folder, beside the code (~/.config/kiosk of the user it's installed for): where the
+    pages and transitions installed for everyone on it are kept. On a server that draws for several kiosks, each runs
+    with its own HOME (servers/<name>), but they share one copy of the code, so an install is the machine's."""
+    return os.path.realpath(os.path.join(here, "..", ".config", "kiosk"))
+
+
 def settings(message, conf=CONF, here=HERE, restart=None):
     """handle() for the server: "get" -> its playlist, the transitions it skips, and what it has installed; "put" ->
     saves them, checked first, then restarts its display so they take effect; "packs" -> passes a request to install,
-    update or remove something to its own packs.py"""
+    update or remove something to the machine's packs.py (kiosk-packs.path watches machine())"""
     playlist, repo, off = os.path.join(conf, "playlist.json"), os.path.join(here, "playlist.json"), os.path.join(conf, "transitions-off.json")
+    shared = machine(here)
     names = themes(os.path.join(here, "transitions"))
     if message.get("op") == "get":
         own = os.path.exists(playlist)
@@ -145,7 +153,7 @@ def settings(message, conf=CONF, here=HERE, restart=None):
             skipped = json.load(open(off))
         except (OSError, ValueError):
             skipped = []
-        read = lambda f, default: json.load(open(os.path.join(conf, f))) if os.path.exists(os.path.join(conf, f)) else default
+        read = lambda f, default: json.load(open(os.path.join(shared, f))) if os.path.exists(os.path.join(shared, f)) else default
         return {"ok": True, "playlist": json.load(open(playlist if own else repo)), "own": own,
                 "off": [n for n in skipped if n in names] if isinstance(skipped, list) else [], "themes": names,
                 "present": present(here), "packs": read("packs.json", {}), "status": read("packs-status.json", {})}
@@ -154,10 +162,10 @@ def settings(message, conf=CONF, here=HERE, restart=None):
             req = pack_request(message.get("request"))
         except ValueError as e:
             return {"ok": False, "error": str(e)}
-        os.makedirs(conf, mode=0o700, exist_ok=True)
-        with open(os.path.join(conf, "packs-request.json.tmp"), "w") as f:
+        os.makedirs(shared, mode=0o700, exist_ok=True)
+        with open(os.path.join(shared, "packs-request.json.tmp"), "w") as f:
             json.dump(req, f)
-        os.replace(os.path.join(conf, "packs-request.json.tmp"), os.path.join(conf, "packs-request.json"))
+        os.replace(os.path.join(shared, "packs-request.json.tmp"), os.path.join(shared, "packs-request.json"))
         return {"ok": True}
     if message.get("op") == "control":   # the Pi's control.py passing on a command from a paired computer
         args = message.get("args")
@@ -245,7 +253,11 @@ def check():
             else:
                 raise AssertionError(f"accepted {message}")
         assert ask({"op": "packs", "request": {"id": "x1", "op": "install", "source": "catalog", "kind": "page", "name": "septa"}}) == {"ok": True}
-        assert json.load(open(f"{d}/conf/packs-request.json"))["name"] == "septa", "it's the server's packs.py that carries it out"
+        assert json.load(open(f"{d}/.config/kiosk/packs-request.json"))["name"] == "septa", \
+            "it's the machine's packs.py that carries it out: beside the code, whatever HOME this kiosk's server has"
+        assert not os.path.exists(f"{d}/conf/packs-request.json")
+        json.dump({"state": "done", "message": "Installed septa from the catalog."}, open(f"{d}/.config/kiosk/packs-status.json", "w"))
+        assert ask({"op": "get"})["status"]["state"] == "done", "and its status comes from there too"
         for bad in ({"op": "format"}, "install", {"op": "install", "name": ["x"]}):
             try:
                 ask({"op": "packs", "request": bad})

@@ -66,8 +66,8 @@ way, and the same server can show the kiosk in a browser too.
 
 ## Several kiosks on one server
 
-Each kiosk gets its own `kiosk-serve` process, with its own port and its own home folder, so its own settings,
-caches and installed pages. They share one copy of the code, and the server's update keeps it current for all of
+Each kiosk gets its own `kiosk-serve` process, with its own port and its own home folder, so its own settings and
+caches. They share one copy of the code, and the pages and transitions installed in it, and the server's update keeps it current for all of
 them. A Pi 4 with 8 GB runs several kiosks this way.
 
 1. **Set up the server as above** for the first kiosk. Its `kiosk-serve` uses `/home/kiosk` and port 7676.
@@ -104,8 +104,9 @@ them. A Pi 4 with 8 GB runs several kiosks this way.
 **Worth knowing:**
 - **Don't run `pi-setup.sh` again for the extra kiosks.** It only sets up the one `kiosk-serve` and the browser
   kiosks.
-- **Installing pages:** the server's update installs what `/home/kiosk/.config/kiosk/installed.json` lists, not what
-  each instance's playlist names. Add a page there before an instance can show it.
+- **Installing pages:** an install from any kiosk's setup page or the Desk Kiosk widget is the server's: it goes to
+  `/home/kiosk/.config/kiosk/`, which `kiosk-packs.path` watches, and every instance can use it. A page any
+  instance's playlist names counts as in use, so it can't be removed and updates keep it.
 - **An update restarts every instance at once,** and each Pi draws its own pages until it reconnects, about a minute
   later.
 - **Each instance takes memory:** about 80 MB just after it starts on a Pi 4, and more once it has drawn every page.
