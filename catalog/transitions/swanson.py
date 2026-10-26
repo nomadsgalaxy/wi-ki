@@ -230,10 +230,13 @@ def refresh():
         _busy.release()
 
 
+
+threading.Thread(target=refresh, daemon=True).start()   # the first one, laid out ahead while a page shows
+
+
 def frames(c, count):
     shown = ready["scene"] or scene(ready["quote"] or pick(quotes()))   # chosen now, and kept for the whole play
-    ready["scene"] = None                    # this one's used: lay out the next while this plays
-    threading.Thread(target=refresh, daemon=True).start()
+    ready["scene"] = None                    # this one's used: the next is laid out once this has played
     down, burnt, up, loose = 0, 0, False, set()
     him = PORTRAIT[0]
     for k in range(count):
@@ -271,6 +274,8 @@ def frames(c, count):
                 fall = (HEIGHT - p * PLANK) * ((t - start) / max(1e-6, 1 - start)) ** 2
                 c.rows(p * PLANK + round(fall), shown["quoted"][p * PLANK * WIDTH * 2:(p + 1) * PLANK * WIDTH * 2])
         yield
+    # the next one, now that this has played: laid out during a play, it took the Zero's one core from the animation
+    threading.Thread(target=refresh, daemon=True).start()
 
 
 def check():

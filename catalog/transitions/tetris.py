@@ -5,7 +5,8 @@ another and clear, and the new page is there underneath.
 The screen is four lines of big blocks, so one I piece clears it all. The pieces are real tetrominoes (I, O, L and J,
 in the game's colours), worked out to fill the stack exactly, and they land bottom first so none hangs in the air.
 """
-import random
+import random, threading
+from functools import cache
 from PIL import Image, ImageDraw
 
 from .canvas import WIDTH, HEIGHT, sprite, banner
@@ -35,20 +36,33 @@ def block(colour):
 def piece(cells, colour):
     """a tetromino from its cells [(column, line)] -> (its sprite, its leftmost column, its top line)"""
     x0, y0 = min(c for c, _ in cells), min(l for _, l in cells)
-    w, h = max(c for c, _ in cells) - x0 + 1, max(l for _, l in cells) - y0 + 1
+    return shape(tuple(sorted((c - x0, l - y0) for c, l in cells)), colour), x0, y0
+
+
+@cache   # a handful of shapes, each always the same colour: made once, not for every piece of every play (seconds on a Zero)
+def shape(cells, colour):
+    w, h = max(c for c, _ in cells) + 1, max(l for _, l in cells) + 1
     img, one = Image.new("RGBA", (w * CELL, h * CELL)), block(colour).convert("RGBA")
     for c, l in cells:
-        img.paste(one, ((c - x0) * CELL, (l - y0) * CELL))
-    return sprite(img), x0, y0
+        img.paste(one, (c * CELL, l * CELL))
+    return sprite(img)
 
 
-def stack(rng):
+def warm():
+    """every shape a stack can have, and the I piece in the well, made ahead, while the kiosk's just showing a page"""
+    for kind in ("II", "OO", "LJ", "JL"):
+        for cells, colour in stack(random.Random(), [kind]):
+            piece(cells, colour)
+    piece([(WELL, l) for l in range(LINES)], CYAN)
+
+
+def stack(rng, kinds=("II", "OO", "LJ", "JL")):
     """the tetrominoes that fill every column but the well, two columns at a time -> [(cells, colour)], bottom first.
     Each pair of columns is two I pieces, two O pieces, or an L and a J locked together"""
     pairs = [c for c in range(COLUMNS) if c != WELL]
     out = []
     for a, b in zip(pairs[::2], pairs[1::2]):
-        kind = rng.choice(("II", "OO", "LJ", "JL"))
+        kind = rng.choice(kinds)
         if kind == "II":
             out += [([(a, l) for l in range(4)], CYAN), ([(b, l) for l in range(4)], CYAN)]
         elif kind == "OO":
@@ -58,6 +72,10 @@ def stack(rng):
             out += [([(high, 1), (high, 2), (high, 3), (low, 3)], BLUE), ([(low, 0), (low, 1), (low, 2), (high, 0)], ORANGE)]
     rng.shuffle(out)
     return sorted(out, key=lambda p: -max(l for _, l in p[0]))   # bottom first: nothing lands on thin air
+
+
+
+threading.Thread(target=warm, daemon=True).start()
 
 
 def frames(c, count):
