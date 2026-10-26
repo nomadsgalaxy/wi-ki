@@ -18,10 +18,10 @@ out) stays until main moves.
   autoupdate.py --status     what's applied, and what's on GitHub
   autoupdate.py --assemble DIR  build the kiosk/ folder a kiosk runs into DIR (deploy.sh uses it)
 """
-import fcntl, filecmp, os, shutil, subprocess, sys, time
+import fcntl, filecmp, json, os, shutil, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves our own folder off the path
-import packs  # noqa: E402
+import packs, pairing  # noqa: E402
 
 HOME = "/home/kiosk"
 CLONE, LIVE = f"{HOME}/wi-ki", f"{HOME}/kiosk"
@@ -29,6 +29,7 @@ OLD_CLONE = f"{HOME}/HiveKiosk"   # the clone's name until October 2026: moved t
 STATE = f"{HOME}/.cache/kiosk"
 APPLIED, REFUSED = f"{STATE}/applied-commit", f"{STATE}/refused-commit"
 UNITS = "/etc/systemd/system"
+AVAHI = "/etc/avahi/services/wi-ki.service"   # so the Desk Kiosk widget can find it (pairing.py find)
 # a kiosk can follow another branch, to try something first; ~/.config is outside ~/kiosk, so updates keep it
 BRANCH = (open(f"{HOME}/.config/kiosk/branch").read().strip() if os.path.exists(f"{HOME}/.config/kiosk/branch") else "") or "main"
 
@@ -137,6 +138,24 @@ def update():
     log(f"applied {new[:7]}: {subject}")
 
 
+def advertise():
+    """every run, since the card ID or render server can change without an update; only on a kiosk with a screen and
+    Avahi, and never in the way of the update itself"""
+    try:
+        if not (os.path.isdir(os.path.dirname(AVAHI)) and os.path.exists("/dev/fb0")):
+            return
+        conf = lambda f: json.load(open(f"{HOME}/.config/kiosk/{f}")) if os.path.exists(f"{HOME}/.config/kiosk/{f}") else {}
+        want = pairing.advert(conf("config.json"), conf("remote.json"))
+        if want is None and os.path.exists(AVAHI):
+            os.remove(AVAHI); log("stopped advertising")
+        elif want is not None and read(AVAHI) != want.strip():
+            with open(AVAHI, "w") as f:   # Avahi notices the change itself
+                f.write(want)
+            log("advertising on the local network")
+    except (OSError, ValueError) as e:
+        log(f"couldn't advertise: {e}")
+
+
 def status():
     kiosk("git", "fetch", "--quiet", "origin", BRANCH)
     applied, latest, refused = read(APPLIED), kiosk("git", "rev-parse", f"origin/{BRANCH}"), read(REFUSED)
@@ -161,6 +180,7 @@ if __name__ == "__main__":
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             sys.exit(log("another update is running") or 0)
+        advertise()
         update()
     else:
         sys.exit(__doc__)

@@ -1,11 +1,26 @@
 #!/bin/sh
 # kiosk-ctl: pick what the desk kiosk shows, from my desktop.
-#   kiosk-ctl status | show <page> | auto | next | thumbs | transitions | transition <name> on|off
-#   kiosk-ctl setup     the kiosk's setup page's address (asks nothing: it's for the widget's Settings button)
-# The kiosk (or its render server) runs kiosk/control.py for this key and nothing else, so the arguments are all it
-# gets. Where to: ~/.config/kiosk-ctl (install.sh writes it) has host=, where the pages are drawn, and setup=, the
-# Pi's setup page; KIOSK_HOST and KIOSK_SETUP override them.
-[ -r ~/.config/kiosk-ctl ] && . ~/.config/kiosk-ctl
+#   kiosk-ctl status | update | show <page> | auto | next | thumbs | transitions | transition <name> on|off
+#   kiosk-ctl setup         the kiosk's setup page's address (asks nothing: it's for the widget's Settings button)
+#   kiosk-ctl screens       the kiosks nearby, one JSON line each (name, address, port, id, server, server_port)
+#   kiosk-ctl pair <addr>   pair with one using the shared key (asks for it, or KIOSK_PAIR_KEY; see kiosk/pairing.py)
+#   kiosk-ctl paired        the card IDs of the kiosks this computer has paired with, one a line
+# The kiosk runs kiosk/control.py for this key and nothing else, so the arguments are all it gets; one drawn by a
+# render server passes them on to it. Which kiosk: KIOSK_SCREEN=<card id> picks ~/.config/kiosk-ctl.d/<card id>
+# (pair writes it); without it, ~/.config/kiosk-ctl (install.sh writes it). Each has host=, where to send commands,
+# and setup=, the Pi's setup page; KIOSK_HOST and KIOSK_SETUP override them.
+here=$(dirname "$(readlink -f "$0")")
+case "${1:-}" in
+  screens) exec python3 -I "$here/../kiosk/pairing.py" find ;;
+  pair) shift; exec python3 -I "$here/../kiosk/pairing.py" pair "$@" ;;
+  paired) ls ~/.config/kiosk-ctl.d 2>/dev/null; exit 0 ;;
+esac
+if [ -n "${KIOSK_SCREEN:-}" ]; then
+  case "$KIOSK_SCREEN" in k-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) echo "not a card ID: $KIOSK_SCREEN" >&2; exit 2 ;; esac
+  . ~/.config/kiosk-ctl.d/"$KIOSK_SCREEN" || exit 2
+elif [ -r ~/.config/kiosk-ctl ]; then
+  . ~/.config/kiosk-ctl
+fi
 host=${KIOSK_HOST:-${host:-kiosk@kiosk.local}}
 if [ "${1:-}" = setup ]; then
   echo "${KIOSK_SETUP:-${setup:-https://${host#*@}}}"

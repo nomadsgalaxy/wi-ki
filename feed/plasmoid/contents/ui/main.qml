@@ -2,11 +2,15 @@
  * Desk Kiosk: a tray button for the desk kiosk, in the kiosk's own look.
  *
  * Click it for what's on the kiosk now, a picture of every page in its rotation (the last time each was on screen) to
- * jump to, Auto, Next and the setup page, and the transitions to turn on and off. Middle-click skips to the next page.
+ * jump to, Auto, Next, Update and the setup page, and the transitions to turn on and off. Middle-click skips to the
+ * next page. Along the top: the screens this computer has paired with, to pick one, and the ones nearby to pair with
+ * (kiosk-ctl pair asks for the shared key in a box of its own, so it's never on a command line).
  *
  * The work lives in kiosk-ctl (feed/kiosk-ctl in the Wi-Ki repo, linked into ~/.local/bin). This only runs it:
  * `status` when the popup opens and every few seconds while it's open, `thumbs` and `transitions` when it opens (and
- * the pictures again every half minute), and `show <page>`, `auto`, `next` or `transition <name> on|off` on a click.
+ * the pictures again every half minute), and `show <page>`, `auto`, `next`, `update` or `transition <name> on|off` on
+ * a click; `paired` and `screens` when it opens, and `pair <address>`. A screen other than the default one is picked
+ * with KIOSK_SCREEN=<card id>.
  * The pages and transitions come from the kiosk, so new ones show up here without touching this file.
  */
 
@@ -14,6 +18,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls as QQC2
 
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.extras as PlasmaExtras
@@ -34,6 +39,11 @@ PlasmoidItem {
     property var off: []
     property string error: ""
     property bool waiting: false   // a command is on its way ("busy" is the widget's own, a spinner)
+    property var version: ({})     // commit, latest, behind, and the render server's, from status
+    property var paired: []        // card IDs, from kiosk-ctl paired
+    property var nearby: []        // {name, address, id, ...}, from kiosk-ctl screens
+    property string pairing: ""    // the address it's pairing with, while it is
+    readonly property string chosen: Plasmoid.configuration.screen
 
     // the kiosk's colours (kit.py): Deep Space, Raised Space, the Hairline, Warp Cyan, Starlight, Dust, Booster Amber
     readonly property color space: "#05060f"
@@ -79,13 +89,37 @@ PlasmoidItem {
             disconnectSource(source);
             const out = ((data["stdout"] || "") + "").trim();
             const failed = ((data["stderr"] || "") + "").trim().split("\n").pop();
-            const ask = source.slice(root.ctl.length + 1);
+            const m = source.match(/^(?:KIOSK_SCREEN=(\S+) )?\S+ (.*)$/);
+            const ask = m[2];
+            if (ask === "paired") {
+                root.paired = out === "" ? [] : out.split("\n");
+                if (root.chosen === "" && root.paired.length > 0) {
+                    root.pick(root.paired[0]);
+                }
+                return;
+            } else if (ask === "screens") {
+                root.nearby = out.split("\n").filter(line => line !== "").map(line => JSON.parse(line));
+                return;
+            } else if (ask.startsWith("pair ")) {
+                root.pairing = "";
+                const id = (out.match(/paired with (k-[0-9a-f]{6})/) || [])[1];
+                root.error = id ? "" : (failed || i18n("Didn't pair"));
+                if (id) {
+                    root.pick(id);
+                }
+                root.ask("paired");
+                return;
+            }
+            if ((m[1] || "") !== root.chosen) {
+                return;   // an answer from the screen it was on before
+            }
             try {
                 if (ask === "status") {
                     const s = JSON.parse(out);
                     root.pages = s.pages;
                     root.showing = s.showing || "";
                     root.pinned = s.pinned || "";
+                    root.version = s;
                     root.error = "";
                 } else if (ask === "thumbs") {
                     root.thumbs = JSON.parse(out);
@@ -114,7 +148,33 @@ PlasmoidItem {
     }
 
     function ask(what) {
-        exec.connectSource(root.ctl + " " + what);
+        exec.connectSource((root.chosen !== "" ? "KIOSK_SCREEN=" + root.chosen + " " : "") + root.ctl + " " + what);
+    }
+
+    function pick(id) {
+        Plasmoid.configuration.screen = id;
+        root.pages = []; root.showing = ""; root.pinned = ""; root.thumbs = {}; root.themes = []; root.version = {};
+        root.waiting = false;
+        refresh();
+    }
+
+    function pair(address) {
+        // plain addresses only: it goes on a command line
+        if (root.pairing !== "" || !/^[A-Za-z0-9.:-]+$/.test(address)) {
+            return;
+        }
+        root.pairing = address;
+        exec.connectSource(root.ctl + " pair " + address);
+    }
+
+    function screenName(id) {
+        const found = root.nearby.find(s => s.id === id);
+        return found ? found.name : id;
+    }
+
+    // how far behind GitHub's main the kiosk (and its render server) is, as it last looked
+    function behind() {
+        return (root.version.behind || 0) + ((root.version.server || {}).behind || 0);
     }
 
     function send(command) {
@@ -132,7 +192,7 @@ PlasmoidItem {
     }
 
     Component.onCompleted: ask("status")
-    onExpandedChanged: if (expanded) refresh()
+    onExpandedChanged: if (expanded) { refresh(); ask("paired"); ask("screens"); }
 
     Timer {
         id: statusSoon
@@ -254,6 +314,57 @@ PlasmoidItem {
                     font.family: root.mono
                     font.pixelSize: Kirigami.Units.gridUnit * 1.6
                     font.bold: true
+                }
+            }
+
+            Text {
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                text: "// SCREENS"
+                color: root.cyan
+                font.family: root.mono
+                font.pixelSize: Kirigami.Units.gridUnit * 1.0
+            }
+
+            // the screens paired with, to pick one; the ones nearby that aren't, and any address, to pair with
+            Flow {
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                Repeater {
+                    model: root.paired
+
+                    KioskButton {
+                        required property string modelData
+                        label: root.screenName(modelData).toUpperCase()
+                        lit: root.chosen === modelData
+                        usable: true
+                        onPressed: root.pick(modelData)
+                    }
+                }
+                Repeater {
+                    model: root.nearby.filter(s => root.paired.indexOf(s.id) < 0)
+
+                    KioskButton {
+                        required property var modelData
+                        label: "+ PAIR " + modelData.name.toUpperCase()
+                        usable: root.pairing === ""
+                        onPressed: root.pair(modelData.address)
+                    }
+                }
+                QQC2.TextField {
+                    id: address
+                    implicitHeight: Kirigami.Units.gridUnit * 2.6
+                    implicitWidth: Kirigami.Units.gridUnit * 12
+                    placeholderText: i18n("or an address")
+                    font.family: root.mono
+                    onAccepted: root.pair(text)
+                }
+                KioskButton {
+                    label: root.pairing !== "" ? "PAIRING…" : "PAIR"
+                    usable: root.pairing === "" && address.text !== ""
+                    onPressed: root.pair(address.text)
                 }
             }
 
@@ -382,6 +493,13 @@ PlasmoidItem {
                     label: "NEXT ›"
                     usable: !root.waiting && root.pages.length > 0
                     onPressed: root.send("next")
+                }
+                KioskButton {
+                    label: root.version.commit === undefined ? "UPDATE"
+                        : root.behind() > 0 ? "UPDATE · " + root.behind() + " BEHIND"
+                        : "UP TO DATE · " + root.version.commit
+                    lit: root.behind() > 0
+                    onPressed: root.send("update")
                 }
                 KioskButton {
                     label: "SETTINGS ↗"

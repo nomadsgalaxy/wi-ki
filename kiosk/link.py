@@ -9,8 +9,9 @@ and each carries the time and a one-off nonce, so a recorded one can't be played
 setup page only shows the settings.
 
   CONF  a=64, then the HMAC-SHA256 of the body in hex, then the body: {"op": "get"}, {"op": "put", "playlist": [...],
-        "off": [...]} (either or both), or {"op": "packs", "request": {...}} to install, update or remove a page or
-        transition there (packs.py), plus "t" and "nonce"
+        "off": [...]} (either or both), {"op": "packs", "request": {...}} to install, update or remove a page or
+        transition there (packs.py), or {"op": "control", "args": [...]}, a control.py command for the server's
+        display, plus "t" and "nonce"
   the reply: CONF a=0, then {"ok": true, ...} or {"ok": false, "error": "..."}
 
 Standard library only, and nothing heavy: the setup page imports this, and it shares a Zero with the display.
@@ -158,6 +159,15 @@ def settings(message, conf=CONF, here=HERE, restart=None):
             json.dump(req, f)
         os.replace(os.path.join(conf, "packs-request.json.tmp"), os.path.join(conf, "packs-request.json"))
         return {"ok": True}
+    if message.get("op") == "control":   # the Pi's control.py passing on a command from a paired computer
+        args = message.get("args")
+        if not (isinstance(args, list) and 0 < len(args) <= 4 and all(isinstance(x, str) and len(x) <= 64 for x in args)):
+            return {"ok": False, "error": "that isn't a command"}
+        import control
+        try:
+            return {"ok": True, "out": control.run(args)}
+        except (ValueError, OSError) as e:
+            return {"ok": False, "error": str(e)}
     if message.get("op") != "put" or not ({"playlist", "off"} & set(message)):
         return {"ok": False, "error": "that isn't something it does"}
     writes = []
@@ -224,7 +234,10 @@ def check():
                 ({"op": "put", "off": ["nope"]}, k, k, "some of its"),
                 ({"op": "put", "playlist": [{"page": "../etc"}]}, k, k, "page's name"),
                 ({"op": "put"}, k, k, "isn't something"),
-                ({"op": "rm"}, k, k, "isn't something")):
+                ({"op": "rm"}, k, k, "isn't something"),
+                ({"op": "control", "args": "next"}, k, k, "isn't a command"),
+                ({"op": "control", "args": ["x" * 65]}, k, k, "isn't a command"),
+                ({"op": "control", "args": ["rm", "-rf"]}, k, k, "usage")):
             try:
                 ask(message, client_key, server_key)
             except ValueError as e:

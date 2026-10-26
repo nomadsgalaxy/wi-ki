@@ -1,0 +1,7 @@
+[Unit]
+Description=Wi-Ki: let the computers paired on the setup page run control.py (see pairing.py)
+
+[Service]
+Type=oneshot
+User=kiosk
+ExecStart=/usr/bin/python3 -I /home/kiosk/kiosk/pairing.py --apply

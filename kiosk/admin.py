@@ -41,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves our own folder off the path
 
-import config, link, look, packs  # noqa: E402
+import config, link, look, packs, pairing  # noqa: E402
 import form as schema  # noqa: E402  the rules for a page's settings panel
 
 CONF = os.path.dirname(config.PATH)
@@ -57,6 +57,7 @@ WORDS = os.path.join(HERE, "words.txt")   # the EFF short word list, 1296 words,
 SCRYPT = {"n": 2 ** 15, "r": 8, "p": 3}   # measured on a Zero beside the display: about 8 s and 43 MB
 CLIENTS, PER_ADDRESS, DEADLINE, BODY = 16, 4, 30, 4096   # 30 s: a login's scrypt alone is about 8 s on a busy Zero
 SESSION = 30 * 60   # a session lasts half an hour since its last use
+PAIR_FOR = 120      # seconds a computer has to answer /pair's nonce
 DOMAIN = "kiosk.local"
 HTTPS, HTTP = 443, 80
 HEADERS = {"Strict-Transport-Security": "max-age=86400", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
@@ -327,6 +328,19 @@ class State:
         self.saving = threading.Lock()   # one settings change at a time
         self.fingerprint = None   # of the certificate it serves by IP, for the screen
         self.generation = 0       # goes up whenever the login changes; a session or a login checked before that is void
+        self.pair_throttle, self.pair_nonces = Throttle(), {}   # its own count, so wrong shared keys don't slow logins
+
+    def pair_nonce(self):
+        """a one-off nonce for GET /pair, good for PAIR_FOR seconds; at most 8 waiting, the oldest dropped"""
+        nonce, now = secrets.token_hex(16), time.monotonic()
+        with self.lock:
+            live = sorted((t, n) for n, t in self.pair_nonces.items() if t > now)[-7:]
+            self.pair_nonces = {n: t for t, n in live} | {nonce: now + PAIR_FOR}
+        return nonce
+
+    def use_nonce(self, nonce):
+        with self.lock:
+            return self.pair_nonces.pop(nonce, 0) > time.monotonic()
 
     def hosts(self, ctx, local):
         """the Hosts a connection may name, by the certificate it was given and the address it came in on: a name
@@ -430,6 +444,12 @@ class Setup(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/up":
             return self.reply("up", kind="text/plain; charset=utf-8")
+        if path == "/pair":
+            s = pairing.stored()
+            if not s:
+                return self.reply(json.dumps({"error": "this kiosk has no shared key yet"}), kind="application/json", code=404)
+            return self.reply(json.dumps({"id": self.state.cfg["id"], "salt": s["salt"], **{k: s[k] for k in "nrp"},
+                                          "nonce": self.state.pair_nonce()}), kind="application/json")
         if path == "/login":
             pre = secrets.token_urlsafe(32)   # the login form's own token, before there's a session to carry one
             return self.reply(page(self.state.cfg["id"], LOGIN_FORM.format(pre=pre, note="")), cookies={"__Host-pre": pre})
@@ -452,6 +472,8 @@ class Setup(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.refuse() or self.framing():
             return
+        if self.path.split("?")[0] == "/pair":   # a computer, not a browser: no Origin, its proof is the shared key
+            return self.pair()
         if not self.same_origin(self.here):
             return self.reply("Changes only come from this page itself.", code=403)
         fields = self.form()
@@ -471,6 +493,27 @@ class Setup(BaseHTTPRequestHandler):
             settled()   # the owner's done: the kiosk's screen goes back to its pages now, not in ten minutes
             return self.go("/login", cookies={"__Host-kiosk": ""})
         self.reply("Nothing here.", code=404)
+
+    def pair(self):
+        """a computer that knows the shared key brings its control key (pairing.py); throttled like a login"""
+        st, who = self.state, self.client_address[0]
+        answer = lambda out, code=200, headers=None: self.reply(json.dumps(out), kind="application/json", code=code, headers=headers)
+        wait = st.pair_throttle.wait(who)
+        if wait:
+            return answer({"error": f"too many wrong shared keys; wait {wait:.0f} s"}, 429, {"Retry-After": str(int(wait) + 1)})
+        try:
+            message = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            entry = pairing.check_pair(message if isinstance(message, dict) else {}, st.use_nonce)
+        except PermissionError as e:
+            st.pair_throttle.fail(who)
+            return answer({"error": str(e)}, 403)
+        except ValueError as e:
+            return answer({"error": str(e)}, 400)
+        st.pair_throttle.ok(who)
+        with st.saving:
+            pairing.add(entry)
+        print(f"admin: paired {entry['name']}", file=sys.stderr, flush=True)
+        return answer({"ok": True, "id": st.cfg["id"]})
 
     def log_in(self, fields):
         st, who = self.state, self.client_address[0]
@@ -510,11 +553,17 @@ class Setup(BaseHTTPRequestHandler):
     def change(self, fields):
         st, who, token = self.state, self.client_address[0], self.cookie("__Host-kiosk")
         user, password, again = fields.get("user", ""), fields.get("password", ""), fields.get("again", "")
+        shared = fields.get("pairing", "")
+        try:
+            shared and pairing.shared(shared)
+            bad_shared = None if shared or pairing.stored() else "Pick a shared key, so your computers can pair with this kiosk."
+        except ValueError as e:
+            bad_shared = str(e)
         problem = ("A user name is 3 to 32 letters, digits, dots, dashes or underscores." if not re.fullmatch(r"[A-Za-z0-9._-]{3,32}", user)
                    else "The passwords don't match." if password != again
                    else "Make the password at least 12 characters." if len(password) < 12
                    else "That's the temporary password; pick your own." if st.temp and password == st.temp["password"]
-                   else None)
+                   else bad_shared)
         s = st.session(token)
         if s is None:   # it ran out (or the login changed) since do_POST looked: log in again, nothing changes
             return self.go("/login")
@@ -537,6 +586,8 @@ class Setup(BaseHTTPRequestHandler):
                     return self.reply(page(st.cfg["id"], change_form(s, "That isn't the current password.")), code=403)
                 st.throttle.ok(who)
             try:
+                if shared:
+                    pairing.save_key(shared)
                 write_private(st.login, {"user": user, **hash_password(password)})
             except OSError as e:   # it may have been saved, or half saved (the rename done, its fsync not): fail closed
                 st.end_all()
@@ -649,7 +700,10 @@ LOGIN_FORM = """<fieldset><legend>Log in</legend><p>Until you've set your own, t
 CHANGE_FORM = """<fieldset><legend>Your login</legend><p>{intro}</p>
 <p class=note>{note}</p><form method=post action=/change class=go><input type=hidden name=csrf value="{csrf}">{current}
 <label>User name<input name=user autocomplete=username></label><label>New password (12 characters or more)<input name=password type=password autocomplete=new-password></label>
-<label>Again<input name=again type=password autocomplete=new-password></label><button>Save</button></form></fieldset>"""
+<label>Again<input name=again type=password autocomplete=new-password></label>
+<label>Shared key, 8 to 32 characters{shared}<input name=pairing type=password autocomplete=off maxlength=32></label>
+<p class=note>Your computers pair with this kiosk using the shared key (the Desk Kiosk widget asks for it). Use the same one on every kiosk.</p>
+<button>Save</button></form></fieldset>"""
 DONE = """<fieldset><legend>Saved</legend><p>Saved. Setting it up by IP address was only for the first login, so this connection is finished.
 From now on, log in at:</p><ul>{ways}</ul></fieldset>"""
 def screen(temp, addresses, fingerprint, done=None):
@@ -681,7 +735,8 @@ def change_form(s, note=""):
     else:
         intro, current = "A new user name and password for this kiosk's setup page.", \
             "<label>Current password<input name=current type=password autocomplete=current-password></label>"
-    return CHANGE_FORM.format(intro=intro, current=current, csrf=s["csrf"], note=html.escape(note))
+    shared = " (leave it empty to keep the one it has)" if pairing.stored() else ""
+    return CHANGE_FORM.format(intro=intro, current=current, csrf=s["csrf"], note=html.escape(note), shared=shared)
 
 
 # --- the settings: the same files kiosk.py reads, beside config.json in ~/.config/kiosk/ ---
@@ -1381,13 +1436,15 @@ def settings_check():
 
 
 def check():
-    import contextlib, http.client, io, tempfile
+    import base64, contextlib, http.client, io, tempfile
     global SCRYPT, SETUP, PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart, PACKS_REQUEST, PACKS_STATUS, PRESENT
     saved, settings_saved = (SCRYPT, SETUP), (PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart, PACKS_REQUEST, PACKS_STATUS, PRESENT)
     SCRYPT = {"n": 2 ** 10, "r": 8, "p": 1}   # quick for the test; the real ones are measured on a Zero
     settings_check()
     with tempfile.TemporaryDirectory() as d:
         SETUP = f"{d}/run/setup.json"
+        pairing_saved = (pairing.PAIRING, pairing.PAIRED, pairing.SCRYPT)
+        pairing.PAIRING, pairing.PAIRED, pairing.SCRYPT = f"{d}/conf/pairing.json", f"{d}/conf/paired.json", SCRYPT
         # the settings' files, and a small catalog: two pages that take a location, one that needs a render server,
         # and two transitions
         PLAYLIST, REPO_PLAYLIST, OFF, REMOTE = (f"{d}/conf/{n}.json" for n in ("playlist", "repo", "off", "remote"))
@@ -1540,7 +1597,10 @@ def check():
         assert ask("POST", "/pages", name, {"action": "add", "page": "sky", "csrf": early}, {"__Host-kiosk": temp_session})[:2] \
             == (303, "/change") and not os.path.exists(PLAYLIST), "the login on the screen can't change settings"
         csrf = re.search(r'name=csrf value="([^"]+)"', ask("GET", "/change", name, cookies={"__Host-kiosk": temp_session})[2]).group(1)
-        new = {"csrf": csrf, "user": "owner", "password": "a much longer one", "again": "a much longer one"}
+        new = {"csrf": csrf, "user": "owner", "password": "a much longer one", "again": "a much longer one", "pairing": "open, sesame"}
+        assert ask("POST", "/change", name, {**new, "pairing": ""}, {"__Host-kiosk": temp_session})[0] == 400, "the first one needs a shared key"
+        assert ask("POST", "/change", name, {**new, "pairing": "short"}, {"__Host-kiosk": temp_session})[0] == 400
+        assert ask("GET", "/pair", name)[0] == 404, "nothing to pair with before there's a shared key"
         assert ask("POST", "/change", name, {**new, "csrf": "wrong"}, {"__Host-kiosk": temp_session})[:2] == (303, "/login"), "CSRF"
         assert ask("POST", "/change", name, {**new, "again": "different"}, {"__Host-kiosk": temp_session})[0] == 400
         assert ask("POST", "/change", name, {**new, "password": "short", "again": "short"}, {"__Host-kiosk": temp_session})[0] == 400
@@ -1554,6 +1614,30 @@ def check():
         assert stored["user"] == "owner" and password_ok("a much longer one", stored) and not password_ok("nope", stored)
         session = jar["__Host-kiosk"]
         assert ask("GET", "/", name, cookies={"__Host-kiosk": temp_session})[:2] == (303, "/login"), "every old session ended"
+        assert "open, sesame" not in open(pairing.PAIRING).read() and os.stat(pairing.PAIRING).st_mode & 0o777 == 0o600
+        # pairing a computer: GET a nonce, POST a proof of the shared key; no Origin, since it's not a browser
+        pub = "ssh-ed25519 " + base64.b64encode(b"\0\0\0\x0bssh-ed25519\0\0\0\x20" + bytes(32)).decode().rstrip("=")
+
+        def offer():
+            o = json.loads(ask("GET", "/pair", name)[2])
+            return o, pairing.derive("open, sesame", o["salt"], o["n"], o["r"], o["p"])
+        o, k = offer()
+        assert o["id"] == "k-abc123" and "key" not in o
+        wrong = pairing.derive("open, sesamee", o["salt"], o["n"], o["r"], o["p"])
+        bid = lambda o, k, who="desktop": json.dumps({"key": pub, "name": who, "nonce": o["nonce"], "proof": pairing.proof(k, o["nonce"], pub, who)})
+        assert ask("POST", "/pair", name, bid(o, wrong), origin=None)[0] == 403, "the wrong shared key"
+        assert ask("POST", "/pair", name, bid(o, k), origin=None)[0] == 400, "and its nonce is used up"
+        o, k = offer()
+        status, _, body, _, _ = ask("POST", "/pair", name, bid(o, k), origin=None)
+        assert status == 200 and json.loads(body) == {"ok": True, "id": "k-abc123"}
+        assert ask("POST", "/pair", name, bid(o, k), origin=None)[0] == 400, "a proof only works once"
+        assert json.load(open(pairing.PAIRED)) == [{"key": pub, "name": "desktop"}]
+        for _ in range(5):
+            o, _k = offer(); ask("POST", "/pair", name, bid(o, wrong), origin=None)
+        o, k = offer()
+        assert ask("POST", "/pair", name, bid(o, k), origin=None)[0] == 429, "five wrong shared keys: it slows down"
+        state.pair_throttle = Throttle()
+        assert ask("POST", "/pair", name, "{not json", origin=None)[0] == 400
         assert ask("GET", "/", name, cookies={"__Host-kiosk": session})[0] == 200
         # the settings: each form changes the kiosk's own files in one move, then restarts the display
         for path in ("/", "/pages", "/transitions", "/location"):
@@ -1820,6 +1904,7 @@ def check():
         per.shutdown(); per.server_close()
     SCRYPT, SETUP = saved
     PLAYLIST, REPO_PLAYLIST, OFF, REMOTE, CATALOG, THEMES, CACHE, restart, PACKS_REQUEST, PACKS_STATUS, PRESENT = settings_saved
+    pairing.PAIRING, pairing.PAIRED, pairing.SCRYPT = pairing_saved
     print("admin: ok")
 
 

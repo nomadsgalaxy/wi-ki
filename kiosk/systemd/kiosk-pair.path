@@ -1,0 +1,10 @@
+[Unit]
+Description=Wi-Ki: watch for the setup page pairing a computer
+
+[Path]
+# the setup page saves paired computers here; it can't see ~/.ssh, so the service writes them in (pairing.py)
+PathChanged=/home/kiosk/.config/kiosk/paired.json
+Unit=kiosk-pair.service
+
+[Install]
+WantedBy=paths.target
