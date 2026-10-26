@@ -16,7 +16,7 @@ setup page only shows the settings.
 
 Standard library only, and nothing heavy: the setup page imports this, and it shares a Zero with the display.
 """
-import hashlib, hmac, json, os, re, secrets, socket, struct, subprocess, threading, time
+import hashlib, hmac, json, os, re, secrets, signal, socket, struct, threading, time
 
 import config
 
@@ -173,7 +173,7 @@ def settings(message, conf=CONF, here=HERE, restart=None):
             return {"ok": False, "error": "that isn't a command"}
         import control
         try:
-            return {"ok": True, "out": control.run(args)}
+            return {"ok": True, "out": control.run(args, restart=lambda: threading.Timer(1, restart_display, [here]).start())}
         except (ValueError, OSError) as e:
             return {"ok": False, "error": str(e)}
     if message.get("op") != "put" or not ({"playlist", "off"} & set(message)):
@@ -199,9 +199,29 @@ def settings(message, conf=CONF, here=HERE, restart=None):
     return {"ok": True}
 
 
+def displays(here=HERE, home=None, proc="/proc"):
+    """the displays that read these settings: every kiosk.py of ours with this HOME. On a server that draws for several
+    kiosks (one HOME each), that's only this kiosk's; on one that draws for one, its browser renderers too"""
+    home = (home or os.path.expanduser("~")).encode()
+    out = []
+    for pid in os.listdir(proc):
+        try:
+            cmd = open(os.path.join(proc, pid, "cmdline"), "rb").read().split(b"\0")
+            env = open(os.path.join(proc, pid, "environ"), "rb").read().split(b"\0")
+        except OSError:   # gone, or someone else's
+            continue
+        if pid.isdigit() and f"{here}/kiosk.py".encode() in cmd and b"HOME=" + home in env:
+            out.append(int(pid))
+    return out
+
+
 def restart_display(here=HERE):
-    """the server's display and its browser renderers start again with the new settings (systemd brings them back)"""
-    subprocess.run(["pkill", "-f", f"(^|/)python3 -I {here}/kiosk.py"], capture_output=True, timeout=10)
+    """this kiosk's displays start again with the new settings (systemd brings them back), and no other kiosk's"""
+    for pid in displays(here):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
 
 
 def check():
@@ -216,6 +236,13 @@ def check():
         assert key(f"{d}/remote.json") == k and key(f"{d}/nope.json") is None
         json.dump({"server": "10.0.0.9", "key": "short"}, open(f"{d}/bad.json", "w"))
         assert key(f"{d}/bad.json") is None, "a key that isn't 64 hex isn't a key"
+        # restarting: only the displays with this HOME, never another kiosk's on the same server
+        for pid, home, cmd in (("101", "/srv/a", f"python3\0-I\0{d}/code/kiosk.py\0--serve"), ("102", "/srv/b", f"python3\0-I\0{d}/code/kiosk.py\0--serve"),
+                               ("103", "/srv/a", "python3\0-I\0/elsewhere/kiosk.py"), ("104", "/srv/a", f"bash\0{d}/code/kiosk.py.sh"), ("self", "/srv/a", "x")):
+            os.makedirs(f"{d}/proc/{pid}")
+            open(f"{d}/proc/{pid}/cmdline", "w").write(cmd); open(f"{d}/proc/{pid}/environ", "w").write(f"USER=kiosk\0HOME={home}\0")
+        os.makedirs(f"{d}/proc/105")   # one that went away while it looked
+        assert displays(f"{d}/code", "/srv/a", f"{d}/proc") == [101], displays(f"{d}/code", "/srv/a", f"{d}/proc")
         restarts = []
         handle = lambda m: settings(m, f"{d}/conf", f"{d}/code", lambda: restarts.append(1))
         nonces = Nonces()
