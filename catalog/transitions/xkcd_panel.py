@@ -204,10 +204,13 @@ def ease(t):
     return t * t * (3 - 2 * t)
 
 
+
+threading.Thread(target=refresh, daemon=True).start()   # the first one, laid out ahead while a page shows
+
+
 def frames(c, count):
     shown = ready["scene"] or scene(pick(kept()))   # chosen now, and kept for the whole play
-    ready["scene"] = None                            # this one's used: lay out the next while this plays
-    threading.Thread(target=refresh, daemon=True).start()
+    ready["scene"] = None                            # this one's used: the next is laid out once this has played
     down = printed = 0
     gone = False
     box = shown["box"]
@@ -229,6 +232,8 @@ def frames(c, count):
             if at < HEIGHT:
                 c.rows(-at, shown["full"]); c.fill(0, HEIGHT - at, WIDTH, 3, EDGE)
         yield
+    # the next one, now that this has played: laid out during a play, it took the Zero's one core from the animation
+    threading.Thread(target=refresh, daemon=True).start()
 
 
 def check():

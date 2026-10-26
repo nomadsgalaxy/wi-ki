@@ -7,9 +7,9 @@ He's arcade pixel art, 16 pixels scaled up 7 times, mouth opening and closing, f
 one picture made once and laid down in whole rows, which costs next to nothing; revealing behind him costs a copy for
 each row of his lane every frame, and he's kept small enough that he and his wipe fit beside that.
 """
-import math
+import math, threading
 from functools import cache
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw
 
 import kit
 from .canvas import WIDTH, HEIGHT, sprite
@@ -51,11 +51,13 @@ FACES = {(m, f): pacman(m, f) for m in set(CHOMP) for f in ("right", "left", "do
 def maze():
     """the maze, the whole screen of it in packed bytes: black, corridors along his path with blue double walls round
     them, dots along the middle and a power pellet at every turn"""
-    corridors = Image.new("L", (WIDTH, HEIGHT))
-    d = ImageDraw.Draw(corridors)
-    for (x0, y0), (x1, y1) in zip(PATH, PATH[1:]):
-        d.rectangle((min(x0, x1) - HALF, min(y0, y1) - HALF, max(x0, x1) + HALF, max(y0, y1) + HALF), fill=255)
-    grow = lambda n: corridors.filter(ImageFilter.MaxFilter(2 * n + 1))   # the corridors, n pixels wider all round
+    def grow(n):
+        """the corridors, n pixels wider all round. They're rectangles, so that's each one drawn n bigger: the same as a
+        (2n + 1)-square max filter over them, and quick, where the filter took over half a minute on a Pi Zero"""
+        img = Image.new("L", (WIDTH, HEIGHT)); d = ImageDraw.Draw(img)
+        for (x0, y0), (x1, y1) in zip(PATH, PATH[1:]):
+            d.rectangle((min(x0, x1) - HALF - n, min(y0, y1) - HALF - n, max(x0, x1) + HALF + n, max(y0, y1) + HALF + n), fill=255)
+        return img
     img = Image.new("RGB", (WIDTH, HEIGHT))
     for outer, inner in ((5, 3), (13, 11)):   # the arcade's walls: two thin blue lines, a little apart
         img.paste(WALL, (0, 0), ImageChops.subtract(grow(outer), grow(inner)))
@@ -69,6 +71,9 @@ def maze():
     for x, y in PATH[1:-1]:                    # and the power pellets
         d.ellipse((x - 16, y - 16, x + 16, y + 16), fill=DOT)
     return kit.rgb565(img)
+
+
+threading.Thread(target=maze, daemon=True).start()   # made ahead, while a page shows, not on his first frame
 
 
 def at(s):
