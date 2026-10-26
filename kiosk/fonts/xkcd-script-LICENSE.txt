@@ -1,0 +1,7 @@
+xkcd-script-subset.ttf is the xkcd Script font from the IPython xkcd-font project
+(https://github.com/ipython/xkcd-font, xkcd-script/font/xkcd-script.ttf), cut down with pyftsubset to Latin-1 and a
+few punctuation marks. It's lettering from xkcd by Randall Munroe, made into a font by the project's contributors.
+
+It is licensed under the Creative Commons Attribution-NonCommercial 3.0 Unported licence:
+https://creativecommons.org/licenses/by-nc/3.0/ (the same terms as the xkcd comics it's used with).
+Only the xkcd_panel transition uses it.
