@@ -85,7 +85,7 @@ def slide(mm, new, step, seconds=SLIDE, fps=30):
     # would land after the end: the final copy (in play()) lands it
     while (done := (time.monotonic() - start + cost) / seconds) < 1:
         began = time.monotonic()
-        x = round((1 - (1 - done) ** 2) * WIDTH) * 2   # bytes the new page is in by then, slowing as it lands
+        x = round(done * done * (3 - 2 * done) * WIDTH) * 2   # bytes the new page is in by then: easing in and out
         for o in range(0, len(new), STRIDE):
             if step > 0:   # in from the right
                 mm[o:o + STRIDE - x] = old[o + x:o + STRIDE]; mm[o + STRIDE - x:o + STRIDE] = new[o:o + x]
@@ -111,6 +111,7 @@ def play(mm, new, theme=None, fps=FPS, on_frame=None):
             canvas.wipe()
             if next(steps, "done") == "done":
                 break
+            canvas.settle()
             if on_frame:
                 on_frame(canvas)
             if fps:
@@ -255,6 +256,16 @@ def check():
         assert bytes(mm) == new, f"{name} ends on the new page"
         mid = seen[len(seen) // 2]
         assert mid[edge] == 2 and mid[-2 - edge] == 1, f"{name}: halfway, the new page is in on its side and the old on the other"
+    # a decoration redrawn every frame (a sheet over the whole screen) never lets the old page show through: a new
+    # frame leaves the screen alone, and settle() puts the page back only where nothing's drawn now
+    from .canvas import STRIDE
+    old, sheet = bytes([1]) * (STRIDE * 8), bytes([9]) * (STRIDE * 8)
+    c = Canvas(bytearray(old), bytes([2]) * len(old))
+    c.rows(0, sheet); c.settle(); c.wipe()
+    assert bytes(c.mm) == sheet, "a new frame doesn't wipe first: no flash of the old page"
+    c.rows(3, sheet[:STRIDE * 5]); c.fill(0, 0, 4, 1, (255, 255, 255), keep=True); c.settle()
+    assert c.mm[STRIDE:3 * STRIDE] == old[:2 * STRIDE] and c.mm[3 * STRIDE:] == sheet[:5 * STRIDE], "back where it's gone"
+    assert c.mm[:8] != old[:8] and c.mm[8:STRIDE] == old[8:STRIDE], "but not under paint kept this frame"
     print("transitions: ok")
 
 

@@ -65,7 +65,8 @@ class Canvas:
     def __init__(self, mm, new):
         self.mm, self.new = mm, new
         self.cur = bytearray(mm[:len(new)])
-        self.dirty = []   # where this frame drew decorations, to wipe at the start of the next
+        self.dirty = []   # where this frame drew decorations, to take off again once the next is drawn
+        self.stale, self.fresh = [], []   # last frame's decorations, waiting for settle(); and this frame's kept paint
 
     def _rect(self, x, y, w, h):
         """a rectangle, clipped to the screen (None if nothing's left)"""
@@ -102,8 +103,7 @@ class Canvas:
             else:
                 for row in range(y, y + h):
                     a = row * STRIDE + x * 2; self.mm[a:a + w * 2] = line
-            if not keep:
-                self.dirty.append(r)
+            (self.fresh if keep else self.dirty).append(r)
 
     def draw(self, spr, x, y, keep=False):
         """draw a sprite with its top left at (x, y), for this frame only, or (keep) until clear() or a reveal.
@@ -117,8 +117,8 @@ class Canvas:
                 if right > left:
                     a = row * STRIDE + left * 2
                     self.mm[a:a + (right - left) * 2] = data[(left - x - dx) * 2:(right - x - dx) * 2]
-        if not keep and (r := self._rect(x, y, spr["w"], spr["h"])):
-            self.dirty.append(r)
+        if (r := self._rect(x, y, spr["w"], spr["h"])):
+            (self.fresh if keep else self.dirty).append(r)
 
     def stamp(self, spr, x, y):
         """draw a sprite for good, as if it were part of the page: for one that's stopped moving"""
@@ -147,10 +147,25 @@ class Canvas:
             self.dirty.append(r)
 
     def wipe(self):
-        """take this frame's decorations off again"""
-        for r in self.dirty:
-            self._copy(self.cur, (self.mm,), r)
-        self.dirty = []
+        """a new frame: this frame's decorations come off once the next one's drawn (settle()), not before, so the old
+        page never shows through for a moment where something's drawn again (a sheet sliding over the whole screen)"""
+        self.stale, self.dirty, self.fresh = self.stale + self.dirty, [], []
+
+    def settle(self):
+        """after a frame's drawn: the page goes back where the last frame drew and this one didn't. Each stale rectangle
+        is cut into bands at the edges of what's drawn now, so it's a few copies a band, never a loop over every pixel"""
+        drawn = self.dirty + self.fresh
+        for x, y, w, h in self.stale:
+            edges = sorted({y, y + h} | {e for _, dy, _, dh in drawn for e in (dy, dy + dh) if y < e < y + h})
+            for top, bottom in zip(edges, edges[1:]):
+                spans = sorted((max(x, dx), min(x + w, dx + dw)) for dx, dy, dw, dh in drawn
+                               if dy <= top and bottom <= dy + dh and dx < x + w and x < dx + dw)
+                at = x
+                for a, b in spans + [(x + w, x + w)]:
+                    if a > at:
+                        self._copy(self.cur, (self.mm,), (at, top, a - at, bottom - top))
+                    at = max(at, b)
+        self.stale = []
 
 
 def simple(shown):

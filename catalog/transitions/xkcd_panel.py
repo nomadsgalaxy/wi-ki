@@ -213,9 +213,11 @@ def frames(c, count):
     ready["scene"] = None                            # this one's used: the next is laid out once this has played
     down = printed = 0
     gone = False
-    box = shown["box"]
+    box, start = shown["box"], time.monotonic()
     for k in range(count):
-        t = k / max(1, count - 1)                    # a lone frame is the first; play() lands on the new page
+        # where it should be by now, or by its frame if that's further: a slow frame on a Zero is a bigger step, rather
+        # than the sheet going in slow motion and then rushing to catch up. A lone frame is the first; play() lands it
+        t = max(k / max(1, count - 1), min(1, (time.monotonic() - start) / SECONDS))
         if t < IN:                                   # in: the sheet slides down over the old page, its edge dark
             at = round(ease(t / IN) * HEIGHT)
             c.rows(at - HEIGHT, shown["words"]); c.fill(0, at, WIDTH, 3, EDGE)
