@@ -19,6 +19,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
+import QtQuick.Window
 
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.extras as PlasmaExtras
@@ -44,6 +45,10 @@ PlasmoidItem {
     property var nearby: []        // {name, address, id, ...}, from kiosk-ctl screens
     property string pairing: ""    // the address it's pairing with, while it is
     readonly property string chosen: Plasmoid.configuration.screen
+    // the popup's unit: Plasma's own on a big screen, smaller on a laptop, so it fits in about half the width and
+    // most of the height (64 units across, about 44 down with a full rotation)
+    readonly property real u: Kirigami.Units.gridUnit * Math.min(1, Screen.desktopAvailableWidth * 0.55 / (64 * Kirigami.Units.gridUnit),
+                                                                 Screen.desktopAvailableHeight * 0.85 / (44 * Kirigami.Units.gridUnit))
 
     // the kiosk's colours (kit.py): Deep Space, Raised Space, the Hairline, Warp Cyan, Starlight, Dust, Booster Amber
     readonly property color space: "#05060f"
@@ -248,7 +253,7 @@ PlasmoidItem {
         property bool usable: !root.waiting
         signal pressed()
 
-        implicitHeight: Kirigami.Units.gridUnit * 2.6
+        implicitHeight: root.u * 2.6
         implicitWidth: words.implicitWidth + Kirigami.Units.largeSpacing * 2
         radius: 2
         color: lit ? Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.14) : root.raised
@@ -262,7 +267,7 @@ PlasmoidItem {
             text: button.label
             color: button.lit ? root.cyan : root.starlight
             font.family: root.mono
-            font.pixelSize: Kirigami.Units.gridUnit * 1.15
+            font.pixelSize: root.u * 1.15
         }
 
         MouseArea {
@@ -280,7 +285,7 @@ PlasmoidItem {
 
         // sized from its parts, never from itself: a popup bound to its own implicitHeight grows a little each layout.
         // The tray only honours a widget's minimum size, so that's set too, or it shrinks the popup to its own default
-        Layout.minimumWidth: Kirigami.Units.gridUnit * 64
+        Layout.minimumWidth: root.u * 64
         Layout.preferredWidth: Layout.minimumWidth
         Layout.minimumHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
         Layout.preferredHeight: Layout.minimumHeight
@@ -307,7 +312,7 @@ PlasmoidItem {
                     text: "// DESK KIOSK"
                     color: root.cyan
                     font.family: root.mono
-                    font.pixelSize: Kirigami.Units.gridUnit * 1.0
+                    font.pixelSize: root.u * 1.0
                 }
                 Text {
                     Layout.fillWidth: true
@@ -315,7 +320,7 @@ PlasmoidItem {
                     text: root.toolTipSubText.toUpperCase()
                     color: root.error !== "" ? root.amber : root.starlight
                     font.family: root.mono
-                    font.pixelSize: Kirigami.Units.gridUnit * 1.6
+                    font.pixelSize: root.u * 1.6
                     font.bold: true
                 }
             }
@@ -325,7 +330,7 @@ PlasmoidItem {
                 text: "// SCREENS"
                 color: root.cyan
                 font.family: root.mono
-                font.pixelSize: Kirigami.Units.gridUnit * 1.0
+                font.pixelSize: root.u * 1.0
             }
 
             // the screens paired with, to pick one; the ones nearby that aren't, and any address, to pair with
@@ -358,8 +363,8 @@ PlasmoidItem {
                 }
                 QQC2.TextField {
                     id: address
-                    implicitHeight: Kirigami.Units.gridUnit * 2.6
-                    implicitWidth: Kirigami.Units.gridUnit * 12
+                    implicitHeight: root.u * 2.6
+                    implicitWidth: root.u * 12
                     placeholderText: i18n("or an address")
                     font.family: root.mono
                     onAccepted: root.pair(text)
@@ -403,7 +408,7 @@ PlasmoidItem {
                 text: "// PAGES"
                 color: root.cyan
                 font.family: root.mono
-                font.pixelSize: Kirigami.Units.gridUnit * 1.0
+                font.pixelSize: root.u * 1.0
             }
 
             // a picture of each page, the last time it was on: click to jump there and stay
@@ -458,7 +463,7 @@ PlasmoidItem {
                                 text: root.title(tile.modelData)
                                 color: root.showing === tile.modelData ? root.cyan : root.starlight
                                 font.family: root.mono
-                                font.pixelSize: Kirigami.Units.gridUnit * 1.0
+                                font.pixelSize: root.u * 1.0
                             }
                             Kirigami.Icon {
                                 visible: root.pinned === tile.modelData
@@ -519,7 +524,7 @@ PlasmoidItem {
                 text: "// TRANSITIONS · a change restarts the display"
                 color: root.cyan
                 font.family: root.mono
-                font.pixelSize: Kirigami.Units.gridUnit * 1.0
+                font.pixelSize: root.u * 1.0
             }
 
             Flow {
