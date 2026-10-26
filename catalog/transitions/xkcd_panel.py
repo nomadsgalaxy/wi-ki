@@ -1,7 +1,8 @@
-"""xkcd panel: a small xkcd comic between pages, in xkcd's own look. A sheet of white paper slides down over the old
-page, with the comic's number, title and alt text hand-lettered on the left (the xkcd Script font, in kiosk/fonts);
-the comic prints in on the right, top to bottom, black ink on white in a wobbly hand-drawn panel; it holds long
-enough to read, and the sheet slides up and away, off the new page.
+"""xkcd panel: a small xkcd comic between pages, in xkcd's own look, in the kiosk's dark. A sheet of the kiosk's dark
+slides down over the old page, with the comic's number, title and alt text hand-lettered on the left in Starlight (the
+xkcd Script font, in kiosk/fonts); the comic prints in on the right, top to bottom, light ink on dark in a wobbly
+hand-drawn panel (black-and-white comics have their colours turned round, as on the xkcd page; colour ones keep theirs,
+on a white card); it holds long enough to read, and the sheet slides up and away, off the new page.
 
 Only small comics, ones you can read in a few seconds: at most 700 x 420 at xkcd's own size, so the bar shows them at
 least that big, with alt text of 120 characters or less. Big ones are for the xkcd page. A transition can't wait on the internet, so a
@@ -11,7 +12,7 @@ laid out before it starts and kept for the whole play. Until it has one, it says
 CC BY-NC 2.5, credited on screen.
 """
 import io, json, os, random, threading, time, urllib.error, urllib.request
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 import kit
 from .canvas import WIDTH, HEIGHT, STRIDE
@@ -29,7 +30,7 @@ WIDE, TALL = 700, 420                    # the biggest a small comic is at xkcd'
 ALT = 120                                     # the longest alt text
 BIGGEST = 4 << 20
 COMIC = (700, 24, WIDTH - 24, HEIGHT - 24)    # where the comic goes
-PAPER, INK, PENCIL, EDGE = (255, 255, 255), (0, 0, 0), (110, 110, 110), (40, 40, 40)
+PAPER, INK, PENCIL, EDGE, CARD = kit.BG, kit.W, kit.G, kit.G, (255, 255, 255)   # the kiosk's dark, Starlight, Dust
 FONT = os.path.join(os.path.dirname(os.path.realpath(kit.__file__)), "fonts", "xkcd-script-subset.ttf")
 LEFT, TEXT_W = 40, 620                        # the words' column
 
@@ -111,6 +112,16 @@ def wrap(words, font, width):
     return lines + [line] if line else lines
 
 
+def lit(pic):
+    """a comic for the dark sheet -> (the picture, on a white card or not). Black-and-white ones have their colours
+    turned round, light on dark and a touch under full white, as the xkcd page does; colour ones keep their colours"""
+    pic = pic.convert("RGB")
+    plain = all(abs(r - g) < 24 and abs(g - b) < 24 for (r, g, b) in pic.resize((64, 64)).getdata())
+    if plain:
+        pic = Image.eval(ImageOps.invert(pic.convert("L")).convert("RGB"), lambda v: v * 236 // 255)
+    return pic, not plain
+
+
 def wobble(d, points, seed, width=3):
     """a hand-drawn line through points: every short stretch nudged a pixel or two off true, the same each time"""
     rnd = random.Random(seed)
@@ -144,12 +155,14 @@ def scene(comic):
         d.text((LEFT, rule + 14 + i * 38), line, font=words, fill=INK)
     d.text((LEFT, HEIGHT - 38), "xkcd.com · Randall Munroe · CC BY-NC 2.5", font=hand(22), fill=PENCIL)
     sheet = kit.rgb565(img)
-    pic = Image.open(comic["file"]).convert("RGB")
+    pic, card = lit(Image.open(comic["file"]))
     w, h = COMIC[2] - COMIC[0] - 24, COMIC[3] - COMIC[1] - 24   # inside its panel
     k = min(w / pic.width, h / pic.height)
     pic = pic.resize((pic.width * int(k), pic.height * int(k)), Image.NEAREST) if k >= 2 else \
         pic.resize((max(1, round(pic.width * k)), max(1, round(pic.height * k))), Image.LANCZOS)
     x, y = COMIC[0] + 12 + (w - pic.width) // 2, COMIC[1] + 12 + (h - pic.height) // 2
+    if card:   # colour keeps its white: a card a little inside the panel
+        d.rectangle((x - 8, y - 8, x + pic.width + 7, y + pic.height + 7), fill=CARD)
     img.paste(pic, (x, y))
     x0, y0, x1, y1 = x - 12, y - 12, x + pic.width + 11, y + pic.height + 11   # the panel, as xkcd draws one
     wobble(d, [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)], comic["num"] + 1)
@@ -218,7 +231,7 @@ def frames(c, count):
         # where it should be by now, or by its frame if that's further: a slow frame on a Zero is a bigger step, rather
         # than the sheet going in slow motion and then rushing to catch up. A lone frame is the first; play() lands it
         t = max(k / max(1, count - 1), min(1, (time.monotonic() - start) / SECONDS))
-        if t < IN:                                   # in: the sheet slides down over the old page, its edge dark
+        if t < IN:                                   # in: the sheet slides down over the old page, its edge light
             at = round(ease(t / IN) * HEIGHT)
             c.rows(at - HEIGHT, shown["words"]); c.fill(0, at, WIDTH, 3, EDGE)
         elif not down:                               # down: the sheet's the page now, for good
@@ -260,9 +273,18 @@ def check():
             x, y, w, h = laid["box"]
             assert COMIC[0] <= x and x + w <= COMIC[2] and COMIC[1] <= y and y + h <= COMIC[3], laid["box"]
             assert len(laid["full"]) == len(laid["words"]) == WIDTH * HEIGHT * 2
+            seen = kit.unpack(Image.frombytes("LA", (WIDTH, HEIGHT), laid["full"]))   # what the framebuffer would show
+            dim = lambda px: sum(px) < 90
+            assert dim(seen.getpixel((5, 5))), "the sheet is the kiosk's dark, not white paper"
+            bx, by = laid["box"][0] + 14, laid["box"][1] + 14   # where the picture starts, doubled up by whole pixels
+            assert sum(seen.getpixel((bx + 100, by + 43))) > 600 and dim(seen.getpixel((bx + 100, by + 100))), \
+                "black and white turned light on dark: the line is light and the paper round it is dark"
             assert scene(None)["box"] is None, "with no comic yet, it says so"
             colour = Image.new("RGB", (500, 500), (200, 40, 40)); colour.save(os.path.join(folder, "3.png"))
-            x, y, w, h = scene({"num": 3, "title": "Ω" * 50, "alt": "word " * 30, "file": os.path.join(folder, "3.png")})["box"]
+            laid = scene({"num": 3, "title": "Ω" * 50, "alt": "word " * 30, "file": os.path.join(folder, "3.png")})
+            x, y, w, h = laid["box"]
+            seen = kit.unpack(Image.frombytes("LA", (WIDTH, HEIGHT), laid["full"]))
+            assert sum(seen.getpixel((x + 10, y + 60))) > 700, "colour keeps its white card, on the dark"
             assert COMIC[0] - 2 <= x and x + w <= COMIC[2] + 3 and y >= 0 and y + h <= HEIGHT, "colour, in its panel"
             assert scene({"num": 4, "title": "A Title Far Too Long To Fit In The Column At Any Size At All", "alt": "x" * 119,
                           "file": os.path.join(folder, "1.png")})["box"], "long words and titles still lay out"
