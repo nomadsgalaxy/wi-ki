@@ -1,0 +1,63 @@
+{
+ "name": "slides",
+ "kind": "page",
+ "home": "public",
+ "about": "cards of your own words, a few side by side and stepping through: what a sign on the door would say (how to join, the tools, how to give, how to get in touch). The cards are set in the playlist",
+ "found": {
+  "main": "10f034"
+ },
+ "shapes": [
+  "bar"
+ ],
+ "needs": {
+  "render": "any",
+  "touch": false,
+  "services": [],
+  "secrets": []
+ },
+ "settings": {
+  "cards": null,
+  "title": "SLIDES",
+  "per": 3,
+  "turn": 10
+ },
+ "form": {
+  "cards": {
+   "type": "internal"
+  },
+  "title": {
+   "type": "text",
+   "label": "Title",
+   "max": 40,
+   "upper": true
+  },
+  "per": {
+   "type": "number",
+   "label": "Cards side by side",
+   "min": 1,
+   "max": 4,
+   "whole": true
+  },
+  "turn": {
+   "type": "number",
+   "label": "Seconds for each set",
+   "min": 3,
+   "max": 120,
+   "whole": true,
+   "unit": "s"
+  }
+ },
+ "ask": [],
+ "licence": {
+  "code": "MIT",
+  "assets": "none: it's all drawn in code",
+  "notes": "MIT, running in the OCL v1.1 + SWAtt v1 engine"
+ },
+ "quality": {
+  "flicker": "unchecked",
+  "licence": "unchecked",
+  "offline": "unchecked",
+  "shapes": "unchecked",
+  "zero": "unchecked"
+ }
+}
