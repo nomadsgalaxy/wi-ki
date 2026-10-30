@@ -4,7 +4,7 @@ things a sign on the door would say: how to join, what tools there are, how to d
 Options (in playlist.json):
   cards   [{"title": "Visit", "lines": ["Open Saturdays, 10 to 4", "..."]}, ...]: up to 12 cards of up to 8 lines each. A long
           line wraps. If one card has too much for the big size, every card on screen with it goes small, so they match.
-          A card can have "qr": "https://..." too, a QR code down its right side. That takes segno (python3-segno),
+          A card can have "qr": "<an address>" too, a QR code down its right side. That takes segno (python3-segno),
           wherever the page is drawn; without it, the card shows the address as a line instead
   title   the masthead's title (default SLIDES)
   per     how many cards side by side (1 to 4, default 3)

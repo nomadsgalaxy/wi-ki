@@ -4,7 +4,7 @@
  "home": "public",
  "about": "cards of your own words, a few side by side and stepping through: what a sign on the door would say (how to join, the tools, how to give, how to get in touch). The cards are set in the playlist, and one can carry a QR code (with python3-segno where it's drawn)",
  "found": {
-  "main": "707f2a"
+  "main": "5cefdb"
  },
  "shapes": [
   "bar"
