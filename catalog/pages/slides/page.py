@@ -3,17 +3,19 @@ things a sign on the door would say: how to join, what tools there are, how to d
 
 Options (in playlist.json):
   cards   [{"title": "Visit", "lines": ["Open Saturdays, 10 to 4", "..."]}, ...]: up to 12 cards of up to 8 lines each. A long
-          line wraps. If one card has too much for the big size, every card on screen with it goes small, so they match
+          line wraps. If one card has too much for the big size, every card on screen with it goes small, so they match.
+          A card can have "qr": "https://..." too, a QR code down its right side. That takes segno (python3-segno),
+          wherever the page is drawn; without it, the card shows the address as a line instead
   title   the masthead's title (default SLIDES)
   per     how many cards side by side (1 to 4, default 3)
   turn    seconds each set of cards stays up (default 10). The page's seconds default to long enough to show them all
 The cards are set in the playlist (or over SSH), not on the setup page: the form has no way to edit a list of cards yet.
 """
-import math
+import functools, math
 from datetime import datetime
-from PIL import ImageDraw
+from PIL import Image, ImageDraw
 
-from kit import SCREEN, O, W, G, RAISED, RULE, Simple, text, masthead
+from kit import SCREEN, O, W, G, BG, RAISED, RULE, Simple, text, masthead
 
 TOP, GAP, PAD = 104, 24, 24   # where the cards start (under the masthead), the space between them, and inside them
 EXAMPLE = [{"title": "Slides", "lines": ["Put your own cards in this page's options: a title and a few lines each"]}]
@@ -54,19 +56,45 @@ def fit(lines, w, h, scale):
     return wrapped if sum(len(x) * step for x in wrapped) + gap * (len(wrapped) - 1) <= h else None
 
 
-def body(box):
-    """the room for a card's lines, under its title: (width, height)"""
+@functools.cache
+def qr(url):
+    """url as a QR code, one pixel a module with its 2-module margin, light on dark ink (an "L" image), or None without
+    segno"""
+    try:
+        import segno
+    except ImportError:
+        return None
+    rows = segno.make(url, error="m", micro=False).matrix
+    img = Image.new("L", (len(rows[0]) + 4, len(rows) + 4), 255)
+    img.putdata([0 if 0 <= y - 2 < len(rows) and 0 <= x - 2 < len(rows[0]) and rows[y - 2][x - 2] else 255
+                 for y in range(img.height) for x in range(img.width)])
+    return img
+
+
+def layout(c, box):
+    """a card's body, under its title: (its lines, the room for them as (width, height), its QR code at size or None)"""
     x0, y0, x1, y1 = box
-    return x1 - x0 - 2 * PAD, y1 - PAD - (y0 + PAD + 64)
+    w, h = x1 - x0 - 2 * PAD, y1 - PAD - (y0 + PAD + 64)
+    code = qr(c["qr"]) if c.get("qr") else None
+    if c.get("qr") and code is None:
+        return c["lines"] + [c["qr"].split("://", 1)[-1]], (w, h), None   # no segno: the address, written out
+    if code:
+        code = code.resize((code.width * (h // code.width),) * 2, Image.NEAREST)
+        w -= code.width + PAD
+    return c["lines"], (w, h), code
 
 
-def card(img, box, title, lines, scale):
-    """one card: a raised panel, its title in the accent, its lines as bullets at scale"""
+def card(img, box, c, scale):
+    """one card: a raised panel, its title in the accent, its lines as bullets at scale, and its QR code on the right"""
     x0, y0, x1, y1 = box
     ImageDraw.Draw(img).rectangle(box, fill=RAISED, outline=RULE, width=2)
-    text(img, (x0 + PAD, y0 + PAD), title[:(x1 - x0 - 2 * PAD) // 24].upper(), O, scale=3)
-    w, h = body(box)
+    text(img, (x0 + PAD, y0 + PAD), c["title"][:(x1 - x0 - 2 * PAD) // 24].upper(), O, scale=3)
+    lines, (w, h), code = layout(c, box)
     y, room = y0 + PAD + 64, y1 - PAD
+    if code:
+        square = Image.new("RGB", code.size, BG)
+        square.paste(W, mask=code)   # light modules and margin, dark ink: what a phone's camera expects
+        img.paste(square, (x1 - PAD - code.width, y))
     for lines_of in fit(lines, w, h, scale) or [wrap(line, w // (8 * scale) - 2) for line in lines]:
         for i, part in enumerate(lines_of):
             if y + 16 * scale > room:
@@ -87,8 +115,9 @@ class Page(Simple):
             raise ValueError("cards has to be a list of 1 to 12 cards")
         for c in cards:
             if not (isinstance(c, dict) and isinstance(c.get("title"), str) and isinstance(c.get("lines"), list)
-                    and len(c["lines"]) <= 8 and all(isinstance(line, str) for line in c["lines"])):
-                raise ValueError('each card is {"title": "...", "lines": ["...", ...]}, with up to 8 lines')
+                    and len(c["lines"]) <= 8 and all(isinstance(line, str) for line in c["lines"])
+                    and (c.get("qr") is None or isinstance(c["qr"], str) and 0 < len(c["qr"]) <= 300)):
+                raise ValueError('each card is {"title": "...", "lines": ["...", ...]}, with up to 8 lines, and maybe "qr": "<an address>"')
         if not (isinstance(per, int) and 1 <= per <= 4) or not (isinstance(turn, (int, float)) and turn >= 3):
             raise ValueError("per is 1 to 4, and turn at least 3 seconds")
         self.cards, self.title, self.turn = cards, str(title)[:40].upper(), turn
@@ -113,9 +142,9 @@ class Page(Simple):
         w = (SCREEN[0] - 2 * GAP - GAP * (len(cards) - 1)) // len(cards)
         boxes = [(GAP + i * (w + GAP), TOP, GAP + i * (w + GAP) + w, SCREEN[1] - GAP) for i in range(len(cards))]
         # one size for the whole set: the big one if every card fits it, so the cards on screen match
-        scale = 2 if all(fit(c["lines"], *body(b), 2) is not None for c, b in zip(cards, boxes)) else 1
+        scale = 2 if all(fit(layout(c, b)[0], *layout(c, b)[1], 2) is not None for c, b in zip(cards, boxes)) else 1
         for c, b in zip(cards, boxes):
-            card(img, b, c["title"], c["lines"], scale)
+            card(img, b, c, scale)
 
 
 def check():
@@ -131,7 +160,12 @@ def check():
     assert [page.showing_set(t0.replace(second=s)) for s in (0, 9, 10, 25, 30)] == [0, 0, 1, 2, 0]
     for s in (0, 10, 20):
         assert page.picture(t0.replace(second=s), None, safe=False).size == SCREEN
-    for bad in ([], "x", [{"title": 1, "lines": []}], [{"title": "t", "lines": ["x"] * 9}]):
+    with_qr = Page(cards=[{"title": "Join", "lines": ["Scan me"], "qr": "https://example.org/join"}])
+    assert with_qr.picture(t0, None, safe=False).size == SCREEN   # a QR code with segno, the address written out without
+    if qr("https://example.org/join") is None:
+        assert layout(with_qr.cards[0], (0, TOP, 600, 491))[0][-1] == "example.org/join"
+    for bad in ([], "x", [{"title": 1, "lines": []}], [{"title": "t", "lines": ["x"] * 9}],
+                [{"title": "t", "lines": [], "qr": ""}], [{"title": "t", "lines": [], "qr": 5}]):
         try:
             Page(cards=bad); raise AssertionError(f"took {bad!r}")
         except ValueError:
